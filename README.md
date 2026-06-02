@@ -4,6 +4,22 @@
 * **Notebook:** [Rental Product Recommendation GRU](https://www.kaggle.com/code/atomstack001/rental-product-recommendation-gru)
 * **Competition:** [Rental Product Recommendation System](https://www.kaggle.com/competitions/rental-product-recommendation-system)
 
+## 🚀 Quick Start (Reproduce in 3 Steps)
+
+This project uses [`uv`](https://docs.astral.sh/uv/) to guarantee 100% dependency reproducibility.
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/rishaviitd/kaggle.rental.product.recommendation.git
+cd kaggle.rental.product.recommendation
+
+# 2. Instantly recreate the exact locked environment
+uv sync
+
+# 3. Run the pipeline (Trains model & generates output/submission.csv)
+uv run main.py
+```
+
 This repository contains a hybrid recommendation system built to predict the next rental product a user will interact with based on their browsing session history.
 
 The solution heavily leverages sequence modeling alongside robust fallback strategies to handle everything from rich, long-term user histories down to complete cold-starts.
