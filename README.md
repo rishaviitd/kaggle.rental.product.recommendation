@@ -1,5 +1,9 @@
 # Kaggle Rental Product Recommendation
 
+🏆 **Best Score on Kaggle (Recall@6: 0.414)**
+* **Notebook:** [Rental Product Recommendation GRU](https://www.kaggle.com/code/atomstack001/rental-product-recommendation-gru)
+* **Competition:** [Rental Product Recommendation System](https://www.kaggle.com/competitions/rental-product-recommendation-system)
+
 This repository contains a hybrid recommendation system built to predict the next rental product a user will interact with based on their browsing session history.
 
 The solution heavily leverages sequence modeling alongside robust fallback strategies to handle everything from rich, long-term user histories down to complete cold-starts.
