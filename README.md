@@ -16,8 +16,11 @@ cd kaggle.rental.product.recommendation
 # 2. Instantly recreate the exact locked environment
 uv sync
 
-# 3. Run the pipeline (Trains model & generates output/submission.csv)
-uv run main.py
+# 3. Train model and save inference artifacts
+uv run train.py
+
+# 4. Generate output/predictions.csv from saved artifacts
+uv run inference.py
 ```
 
 This repository contains a hybrid recommendation system built to predict the next rental product a user will interact with based on their browsing session history.
