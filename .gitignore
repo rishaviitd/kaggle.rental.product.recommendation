@@ -1,0 +1,42 @@
+# Local project context
+context/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+
+# Virtual environments
+.venv/
+.venv-*/
+venv/
+env/
+
+# Environment files
+.env
+.env.*
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Build and packaging
+build/
+dist/
+*.egg-info/
+
+# OS and editor files
+.DS_Store
+.vscode/
+.idea/
+
+# Local outputs and transient artifacts
+output/
+submission/eval/
+data/transient/
+
+# Logs
+*.log
