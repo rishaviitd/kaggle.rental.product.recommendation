@@ -1,6 +1,6 @@
 # Kaggle Rental Product Recommendation
 
-🏆 **Best Score on Kaggle (Recall@6: 0.414)**
+🏆 **Best Score on Kaggle (Recall@6: 0.417)**
 * **Notebook:** [Rental Product Recommendation GRU](https://www.kaggle.com/code/atomstack001/rental-product-recommendation-gru)
 * **Competition:** [Rental Product Recommendation System](https://www.kaggle.com/competitions/rental-product-recommendation-system)
 
@@ -29,9 +29,52 @@ The solution heavily leverages sequence modeling alongside robust fallback strat
 
 ## Overall Architecture
 
-The system operates as a **Multi-Tiered Recommender**. The core of the system is a Temporal Dual-Path GRU (Gated Recurrent Unit) neural network that predicts the next item in a sequence based on recent user clicks and the time spent on those items. 
+The system operates as a **Multi-Tiered Recommender**. The core of the system is a Dual-Path GRU (Gated Recurrent Unit) neural network that predicts the next item in a sequence based on recent product clicks, price tier, and category context.
 
-Because neural networks struggle with very short sessions (e.g., 1 or 2 clicks), the system seamlessly degrades into statistical co-occurrence (P2P), behavioral mappings, text-search indexing, and global popularity to guarantee 6 high-quality recommendations for every single visit.
+Because neural networks struggle with very short sessions (e.g., 1 or 2 clicks), the system falls back to simpler statistical strategies based on how many products the user actually viewed. This routing guarantees 6 high-quality recommendations for every single visit, even for brand-new products with no history.
+
+```mermaid
+flowchart TD
+    VISIT["User Visit<br/>(browsing session)"] --> Q{"How many products<br/>were viewed?"}
+
+    Q -->|"3 or more"| GRU["Dual-Path GRU<br/>personalized predictions"]
+    Q -->|"1 or 2"| STAT["Statistical Tiers<br/>pairwise transitions (what comes next)<br/>trigrams (3-item click patterns)<br/>co-occurrence (items viewed together)"]
+    Q -->|"0 / unknown items"| COLD["Cold-Start Tiers<br/>inverted index search +<br/>category-to-product popularity"]
+
+    GRU --> FILL{"Have 6<br/>recommendations?"}
+    STAT --> FILL
+    COLD --> FILL
+
+    FILL -->|"No"| POP["Global Popularity<br/>most-rented products"]
+    FILL -->|"Yes"| OUT["Final 6 Recommendations"]
+    POP --> OUT
+
+    classDef entry fill:#eef2ff,stroke:#6366f1,color:#1e293b;
+    classDef decision fill:#fef9c3,stroke:#eab308,color:#1e293b;
+    classDef model fill:#dcfce7,stroke:#22c55e,color:#1e293b;
+    classDef fallback fill:#ffedd5,stroke:#f97316,color:#1e293b;
+    classDef output fill:#cffafe,stroke:#06b6d4,color:#1e293b;
+
+    class VISIT entry;
+    class Q,FILL decision;
+    class GRU model;
+    class STAT,COLD,POP fallback;
+    class OUT output;
+```
+
+The session length decides which tier handles the visit, and unfilled slots always cascade down to global popularity:
+
+* **Tier 1: GRU Predictions (Rich Sessions)**
+  * Used for sessions with 3 or more product interactions, leveraging the trained neural network for highly contextual, personalized recommendations.
+
+* **Tier 2: Co-occurrence & Transitions (Short Sessions)**
+  * Used for 1–2 interaction sessions, relying on pairwise transition tables (what product usually comes next), trigrams (common 3-item click patterns), and co-occurrence (items often viewed together).
+
+* **Tier 3: Search & Behavioral Fallback (Cold Start)**
+  * Queries an inverted index over product-URL keywords to match cold-start items, then falls back to category-to-product popularity from the last viewed category.
+
+* **Tier 4: Global Popularity (Absolute Fallback)**
+  * Fills any remaining slots with the most-rented products overall, guaranteeing exactly 6 valid predictions for every visit.
 
 ---
 
@@ -49,44 +92,74 @@ Before any machine learning happens, the data from the old site and the new site
 
 ## 2. Feature Engineering
 
-The model doesn't just look at *what* the user clicked, it looks at *how* they clicked it.
+The GRU focuses on compact sequence features that proved most useful in ablations.
 
-* **Temporal Features**
-  * Calculates dwell time (how long a user looked at an item), inter-session gaps, and applies mathematical time-decay to older actions.
-  * Encodes cyclical time elements (Time of Day, Day of Week) so the model can learn if certain items are rented more on weekends or evenings.
+* **GRU Inputs**
+  * Product token sequence from merged browsing sessions.
+  * Price tier embedding for each clicked product.
+  * Category sequence for the parallel category GRU path.
 
-* **Behavioral & Item Features**
-  * Precomputes global popularity scores and specific item-to-item (P2P) transition strengths over the last 6 months.
-  * Embeds static item metadata like price tiers and categories directly into the feature space for the model to utilize.
+* **Training-Time Recency**
+  * Applies exponential sample weighting so more recent sessions contribute more to the loss.
 
-## 3. Core Model: Temporal Dual-Path GRU
+* **Fallback Signals**
+  * Precomputes the statistical lookup tables (co-occurrence, transitions, trigrams, category-to-product, inverted search index, global popularity) that power the fallback tiers described in the Overall Architecture above.
+
+## 3. Core Model: Dual-Path GRU
 
 The primary prediction engine is a custom PyTorch sequence model.
 
+```mermaid
+flowchart TD
+    subgraph Inputs
+        X["Product Token Sequence<br/>(B, T)"]
+        TIER["Price Tier Sequence<br/>(B, T)"]
+        CAT["Category Sequence<br/>(B, T)"]
+    end
+
+    subgraph ItemPath["Item Path"]
+        IE["Item Embedding<br/>(128-d)"]
+        TE["Tier Embedding<br/>(4-d)"]
+        CONCAT["Concat<br/>item + tier"]
+        IPROJ["Linear -> ReLU -> Dropout<br/>(128-d)"]
+        IGRU["Item GRU<br/>(hidden 128)"]
+    end
+
+    subgraph CatPath["Category Path"]
+        CE["Category Embedding<br/>(8-d)"]
+        CPROJ["Linear -> ReLU -> Dropout<br/>(96-d)"]
+        CGRU["Category GRU<br/>(hidden 96)"]
+    end
+
+    FUSE["Concat item_h + cat_h<br/>(224-d)"]
+    OUT["Output Linear<br/>(num_items + 1)"]
+    SCORES["Next-Item Scores"]
+
+    X --> IE
+    TIER --> TE
+    IE --> CONCAT
+    TE --> CONCAT
+    CONCAT --> IPROJ --> IGRU --> FUSE
+
+    CAT --> CE --> CPROJ --> CGRU --> FUSE
+
+    FUSE --> OUT --> SCORES
+
+    classDef input fill:#eef2ff,stroke:#6366f1,color:#1e293b;
+    classDef item fill:#dcfce7,stroke:#22c55e,color:#1e293b;
+    classDef cat fill:#fae8ff,stroke:#d946ef,color:#1e293b;
+    classDef head fill:#cffafe,stroke:#06b6d4,color:#1e293b;
+
+    class X,TIER,CAT input;
+    class IE,TE,CONCAT,IPROJ,IGRU item;
+    class CE,CPROJ,CGRU cat;
+    class FUSE,OUT,SCORES head;
+```
+
 * **Item Path**
-  * Feeds the sequence of clicked product IDs (along with temporal features like dwell time and decay) into a dedicated GRU layer.
-  * Learns complex, deep relationships between specific items based on chronological user journeys.
+  * Feeds the sequence of clicked product IDs and price tier embeddings into a dedicated GRU layer.
+  * Learns relationships between specific items based on chronological user journeys.
 
 * **Category Path**
   * Simultaneously feeds the sequence of product categories into a parallel, secondary GRU layer.
   * Allows the model to recognize high-level intent (e.g., "this user is looking at strollers") even if it hasn't seen the specific item IDs before.
-
-## 4. Multi-Tiered Inference Engine
-
-When predicting the next 6 items for a test visit, the system evaluates the session length and chooses the best available strategy.
-
-* **Tier 1: GRU Predictions (Rich Sessions)**
-  * Used for sessions with 3 or more product interactions, leveraging the trained neural network to generate highly contextual recommendations.
-  * Provides the most accurate, personalized results for deeply engaged users.
-
-* **Tier 2: Co-occurrence & Transitions (Short Sessions)**
-  * Used for sessions with only 1 or 2 interactions by relying on statistical Item-to-Item (P2P) transition matrices built from the training data.
-  * Recommends the items that most frequently follow the specific product the user just looked at.
-
-* **Tier 3: Search & Behavioral Fallback (Cold Start)**
-  * Uses a custom text-search index to find products matching the URL slugs, or recommends popular items from the last viewed category (cat2p).
-  * Prevents empty recommendations when the user interacts with brand new items that lack historical data.
-
-* **Tier 4: Global Popularity (Absolute Fallback)**
-  * Fills any remaining recommendation slots with the most universally popular products rented over the last 6 months.
-  * Guarantees that the system always outputs exactly 6 valid predictions, maximizing baseline hit rates.
