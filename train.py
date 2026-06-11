@@ -10,6 +10,8 @@ import re
 from collections import defaultdict, Counter
 from pathlib import Path
 
+import catboost as cb
+import mlflow
 import numpy as np
 import pandas as pd
 import torch
@@ -65,6 +67,19 @@ MAX_PRODUCT_AGE_DAYS = 365 * 4
 MAX_PRODUCT_RECENCY_DAYS = 365 * 4
 MAX_PRODUCT_VELOCITY = 10.0
 
+RERANKER_CANDIDATE_K_VALUES = [20, 50, 100]
+RERANKER_MAX_VALIDATION_SESSIONS = 30000
+RERANKER_ITERATIONS = 300
+RERANKER_LEARNING_RATE = 0.05
+RERANKER_DEPTH = 5
+RERANKER_PRICE_COLUMNS = [
+    "price_per_period3days",
+    "price_per_period_week",
+    "price_per_period2weeks",
+    "price_per_period3weeks",
+    "price_per_period4weeks",
+]
+
 print(f"🧪 Temporal Features Configuration:")
 print(f"   Dwell Time: {USE_DWELL_TIME}")
 print(f"   Session Elapsed: {USE_SESSION_ELAPSED}")
@@ -77,6 +92,131 @@ print(f"   Inter-session Gap: {USE_INTER_SESSION_GAP}")
 print(f"   Product Age: {USE_PRODUCT_AGE}")
 print(f"   Product Recency: {USE_PRODUCT_RECENCY}")
 print(f"   Product Velocity: {USE_PRODUCT_VELOCITY}")
+
+LATIN_TO_RU_CATEGORY = {
+    "kolyaski": "Коляски",
+    "progulochnye-kolyaski": "Прогулочные коляски",
+    "kolyaski-dlya-puteshestviy": "Коляски YoYo",
+    "kolyaski-yoyo": "Коляски YoYo",
+    "kolyaski-dlya-novorozhdennyh-lyulki": "Коляски YoYo",
+    "avtokresla": "Автокресла",
+    "detskie-avtokresla": "Автокресла, автолюльки",
+    "avtokresla-avtolyulki": "Автокресла для новорождённых",
+    "avtokresla-dlya-novorozhdyonnyh": "Автокресла для новорождённых",
+    "avtokresla-9-36-kg": "Автокресла 9-36 кг",
+    "velokresla": "Велокресла",
+    "krovatki-manezhi": "Кроватки, манежи",
+    "manezhi-i-krovatki": "Кроватки, манежи",
+    "bedroom": "Кроватки, манежи",
+    "kokony-dlya-novorozhdennyh": "Коконы для новорожденных",
+    "kokon-dlya-novorozhdennyh": "Коконы для новорожденных",
+    "stulchiki-dlya-kormleniya": "Стульчики для кормления",
+    "stul-chiki-dlya-kormleniya": "Стульчики для кормления",
+    "molokootsosy": "Молокоотсосы Medela",
+    "molokootsosy-medela": "Молокоотсосы Medela",
+    "hodunki": "Классические ходунки",
+    "klassicheskie-hodunki": "Классические ходунки",
+    "hodunki-katalki": "Ходунки-каталки",
+    "hodunkikatalki": "Ходунки-каталки",
+    "katalki": "Каталки",
+    "begovely": "Беговелы",
+    "samokaty": "Самокаты",
+    "velosipedy": "Велосипеды",
+    "kachalki": "Качалки",
+    "kacheli-i-kachalki": "Качалки",
+    "elektrokacheli": "Электрокачели",
+    "elektro-kacheli": "Электрокачели",
+    "shezlongi": "Шезлонги",
+    "shezlongi-detskie-lyulki": "Шезлонги",
+    "igrushki": "Игрушки",
+    "konstruktory": "Конструкторы",
+    "sortery": "Сортеры и пирамидки",
+    "sortery-i-piramidki": "Сортеры и пирамидки",
+    "razvivayuschie-kovriki": "Развивающие коврики",
+    "muzykalnye-igrushki": "Музыкальные игрушки",
+    "muzykal-nye-igrushki": "Музыкальные игрушки",
+    "muzykalnye-instrumenty": "Музыкальные инструменты",
+    "muzykalnye-stoliki": "Музыкальные столики",
+    "razvivayuschie-stoliki": "Музыкальные столики",
+    "mashinki-ruli-i-garazhi": "Машинки и гаражи",
+    "parkovki-i-garazhi": "Машинки и гаражи",
+    "igrovye-tsentry-i-kompleksy": "Игровые центры и комплексы",
+    "multicentry": "Игровые центры и комплексы",
+    "podvizhnye-igry": "Игровые центры и комплексы",
+    "igrovye-paneli": "Игровые панели и бизиборды",
+    "bizibordy": "Игровые панели и бизиборды",
+    "busyboard": "Игровые панели и бизиборды",
+    "prygunki": "Прыгунки",
+    "sportkompleksy": "Спортивные комплексы",
+    "sportivnye-kompleksy": "Спортивные комплексы",
+    "complex": "Спортивные комплексы",
+    "aksessuary-k-sportkompleksam": "Аксессуары к спорткомплексам",
+    "gorki": "Горки",
+    "batuty": "Батуты",
+    "suhie-basseyny": "Сухие бассейны",
+    "videonyani": "Видеоняни",
+    "videonyani-prokat-radionyani": "Видеоняни",
+    "radionyani": "Видеоняни",
+    "ograzhdeniya": "Ограждения",
+    "playpens": "Ограждения",
+    "vannochki-dlya-kupaniya": "Ванночки для купания",
+    "vsyo-dlya-kupaniya": "Ванночки для купания",
+    "igrushki-dlya-kupaniya": "Игрушки для ванной",
+    "chemodany": "Чемоданы и рюкзаки",
+    "chemodany-i-ryukzaki": "Чемоданы и рюкзаки",
+    "detskie-vesy": "Весы",
+    "vesy": "Весы",
+    "vesy-sasha": "Весы Саша",
+    "meditsinskie-tovary": "Медицинские товары",
+}
+
+RU_TO_SUPER_CATEGORY = {
+    "Коляски": "strollers",
+    "Прогулочные коляски": "strollers",
+    "Коляски YoYo": "strollers",
+    "Автокресла": "car_seats",
+    "Автокресла, автолюльки": "car_seats",
+    "Автокресла для новорождённых": "car_seats",
+    "Автокресла 9-36 кг": "car_seats",
+    "Велокресла": "car_seats",
+    "Кроватки, манежи": "furniture_sleep",
+    "Коконы для новорожденных": "furniture_sleep",
+    "Стульчики для кормления": "feeding",
+    "Молокоотсосы Medela": "feeding",
+    "Классические ходунки": "baby_movement",
+    "Ходунки-каталки": "baby_movement",
+    "Каталки": "baby_movement",
+    "Беговелы": "baby_movement",
+    "Самокаты": "baby_movement",
+    "Велосипеды": "baby_movement",
+    "Качалки": "baby_movement",
+    "Электрокачели": "baby_movement",
+    "Шезлонги": "baby_movement",
+    "Игрушки": "toys",
+    "Конструкторы": "toys",
+    "Сортеры и пирамидки": "toys",
+    "Развивающие коврики": "toys",
+    "Музыкальные игрушки": "toys",
+    "Музыкальные инструменты": "toys",
+    "Музыкальные столики": "toys",
+    "Машинки и гаражи": "toys",
+    "Игровые центры и комплексы": "play_activity",
+    "Игровые панели и бизиборды": "play_activity",
+    "Прыгунки": "play_activity",
+    "Спортивные комплексы": "sports_outdoor",
+    "Аксессуары к спорткомплексам": "sports_outdoor",
+    "Горки": "sports_outdoor",
+    "Батуты": "sports_outdoor",
+    "Сухие бассейны": "sports_outdoor",
+    "Видеоняни": "safety_monitoring",
+    "Ограждения": "safety_monitoring",
+    "Ванночки для купания": "bath_care",
+    "Игрушки для ванной": "bath_care",
+    "Чемоданы и рюкзаки": "travel_storage",
+    "Весы": "medical",
+    "Весы Саша": "medical",
+    "Медицинские товары": "medical",
+}
 
 def save_pickle_artifact(name, value):
     path = ARTIFACTS_DIR / name
@@ -156,10 +296,32 @@ def save_inference_artifacts():
     }
 
     save_json_artifact("global_top.json", global_top)
+    save_json_artifact("latin_to_ru_category.json", LATIN_TO_RU_CATEGORY)
+    save_json_artifact("ru_to_super_category.json", RU_TO_SUPER_CATEGORY)
+    if "reranker_feature_columns" in globals():
+        save_json_artifact("reranker_feature_columns.json", reranker_feature_columns)
+    if "reranker_cat_features" in globals():
+        save_json_artifact("reranker_cat_features.json", reranker_cat_features)
+    if "reranker_k_results" in globals():
+        save_json_artifact("reranker_k_results.json", reranker_k_results)
+    if "best_reranker_config" in globals():
+        save_json_artifact("reranker_config.json", best_reranker_config)
+    if "reranker_model_paths" in globals():
+        save_json_artifact("reranker_model_paths.json", reranker_model_paths)
     save_json_artifact("config.json", config)
     save_json_artifact("metadata.json", metadata)
 
-    saved_count = len(pickle_artifacts) + 3
+    saved_count = len(pickle_artifacts) + 5
+    saved_count += sum(
+        name in globals()
+        for name in [
+            "reranker_feature_columns",
+            "reranker_cat_features",
+            "reranker_k_results",
+            "best_reranker_config",
+            "reranker_model_paths",
+        ]
+    )
     print(f"   ✅ Saved {saved_count} inference artifacts to: {ARTIFACTS_DIR}")
 
 # ==============================================================================
@@ -776,8 +938,15 @@ for slug, pid in zip(old_prods['slug'], old_prods['new_id'].astype(int)):
 
 new_prods = pd.read_parquet(f'{DATA_DIR}/new_site_products.parquet')
 new_prods = new_prods.dropna(subset=['slug', 'id'])
+new_prods = new_prods.drop_duplicates(subset=['id'], keep='first')
 for slug, pid in zip(new_prods['slug'], new_prods['id'].astype(int)):
     slug_map.setdefault(slug, pid)
+product_feature_map = (
+    new_prods.set_index(new_prods['id'].astype(int))[
+        ['brand', 'main_category', *RERANKER_PRICE_COLUMNS]
+    ]
+    .to_dict(orient='index')
+)
 
 print(f"   Old-site products mapped: {len(old_prods):,}")
 print(f"   New-site products: {len(new_prods):,}")
@@ -894,6 +1063,411 @@ def search_products(query_slug, n=10):
             for pid in search_index[k]:
                 candidates[pid] += 1
     return [pid for pid, _ in candidates.most_common(n)]
+
+def coocc_scores(seq, coocc, lookback=5):
+    scores = defaultdict(float)
+    recent = [str(x) for x in seq[-lookback:]]
+    for i, item in enumerate(reversed(recent)):
+        pos_weight = 1.0 / (i + 1)
+        for neighbor, w in coocc.get(item, {}).items():
+            scores[str(neighbor)] += pos_weight * float(w)
+    return scores
+
+@torch.no_grad()
+def gru_predict_topk_with_scores(gru_model, encoded_seq, k, device):
+    if not encoded_seq:
+        return []
+    unpacked = list(zip(*encoded_seq))
+    session_tokens = list(unpacked[0])
+    session_dwell = list(unpacked[1])
+    session_elapsed = list(unpacked[2])
+    session_hour = list(zip(unpacked[3], unpacked[4]))
+    session_dow = list(unpacked[5])
+    session_month = list(zip(unpacked[6], unpacked[7]))
+    session_gap = list(unpacked[8])
+    session_age = list(unpacked[9])
+    session_recency = list(unpacked[10])
+    session_velocity = list(unpacked[11])
+    session_decay = list(unpacked[12])
+    session_tier = list(unpacked[13])
+    session_pop = list(unpacked[14])
+    session_p2p = list(unpacked[15])
+    session_not_bounce = list(unpacked[16])
+    session_cat = list(unpacked[17])
+
+    x = torch.tensor(session_tokens, dtype=torch.long, device=device).unsqueeze(0)
+    tier_t = torch.tensor(session_tier, dtype=torch.long, device=device).unsqueeze(0)
+    pop_t = torch.tensor(session_pop, dtype=torch.float, device=device).unsqueeze(0)
+    p2p_t = torch.tensor(session_p2p, dtype=torch.float, device=device).unsqueeze(0)
+    nb_t = torch.tensor(session_not_bounce, dtype=torch.float, device=device).unsqueeze(0)
+    cat_t = torch.tensor(session_cat, dtype=torch.long, device=device).unsqueeze(0)
+    dwell_t = torch.tensor(session_dwell, dtype=torch.float, device=device).unsqueeze(0)
+    elapsed_t = torch.tensor(session_elapsed, dtype=torch.float, device=device).unsqueeze(0)
+    hour_t = torch.tensor(session_hour, dtype=torch.float, device=device).unsqueeze(0)
+    dow_t = torch.tensor(session_dow, dtype=torch.long, device=device).unsqueeze(0)
+    month_t = torch.tensor(session_month, dtype=torch.float, device=device).unsqueeze(0)
+    gap_t = torch.tensor(session_gap, dtype=torch.float, device=device).unsqueeze(0)
+    age_t = torch.tensor(session_age, dtype=torch.float, device=device).unsqueeze(0)
+    recency_t = torch.tensor(session_recency, dtype=torch.float, device=device).unsqueeze(0)
+    velocity_t = torch.tensor(session_velocity, dtype=torch.float, device=device).unsqueeze(0)
+    decay_t = torch.tensor(session_decay, dtype=torch.float, device=device).unsqueeze(0)
+
+    logits = gru_model(
+        x, tier_t, pop_t, p2p_t, nb_t, cat_t, dwell_t, elapsed_t, hour_t, dow_t,
+        month_t, gap_t, age_t, recency_t, velocity_t, decay_t
+    )[0, -1]
+    logits[0] = -float('inf')
+    for token_id in session_tokens:
+        if 0 < token_id < len(logits):
+            logits[token_id] = -float('inf')
+    top_k = min(k, len(logits) - 1)
+    scores, indices = torch.topk(logits, top_k)
+    return [(int(idx), float(score)) for idx, score in zip(indices.tolist(), scores.tolist()) if idx > 0]
+
+def add_reranker_candidate(candidates, product_id, source, score, rank, weight=1.0):
+    pid = str(product_id)
+    row = candidates.setdefault(
+        pid,
+        {
+            "product_id": pid,
+            "candidate_base_score": 0.0,
+            "source_count": 0,
+            "best_source_rank": 9999,
+            "is_from_gru": 0,
+            "is_from_coocc": 0,
+            "is_from_p2p": 0,
+            "is_from_trigram": 0,
+            "is_from_cat2p": 0,
+            "is_from_order": 0,
+            "is_from_search": 0,
+            "is_from_global": 0,
+        },
+    )
+    source_flag = f"is_from_{source}"
+    rank_col = f"{source}_rank"
+    score_col = f"{source}_score"
+    if row.get(source_flag, 0) == 0:
+        row["source_count"] += 1
+    row[source_flag] = 1
+    row[rank_col] = min(row.get(rank_col, 9999), rank)
+    row[score_col] = max(float(row.get(score_col, -np.inf)), float(score))
+    row["best_source_rank"] = min(row["best_source_rank"], rank)
+    row["candidate_base_score"] += float(score) * weight
+
+def build_candidate_rows_for_session(
+    session_id,
+    input_actions,
+    target_pid,
+    last_cat,
+    max_candidates,
+    gru_model,
+    device,
+):
+    product_seq = [int(action[1]) for action in input_actions]
+    seen = set(str(pid) for pid in product_seq)
+    candidates = {}
+
+    encoded = encode_sequence_with_temporal(input_actions, pid2idx, p2p=p2p, p2p_totals=p2p_totals)
+    if len(encoded) >= 2:
+        for rank, (idx, score) in enumerate(gru_predict_topk_with_scores(gru_model, encoded, max_candidates, device), start=1):
+            pid = idx2pid.get(idx)
+            if pid is not None and str(pid) not in seen:
+                add_reranker_candidate(candidates, pid, "gru", score, rank, weight=2.5)
+
+    for rank, (pid, score) in enumerate(sorted(coocc_scores(product_seq, coocc).items(), key=lambda x: -x[1])[:max_candidates], start=1):
+        if pid not in seen:
+            add_reranker_candidate(candidates, pid, "coocc", score, rank, weight=1.0)
+
+    if product_seq:
+        last_pid = str(product_seq[-1])
+        for rank, (pid, score) in enumerate(p2p.get(last_pid, Counter()).most_common(max_candidates), start=1):
+            if str(pid) not in seen:
+                add_reranker_candidate(candidates, pid, "p2p", score, rank, weight=2.0)
+
+    if len(product_seq) >= 2:
+        key = (str(product_seq[-2]), str(product_seq[-1]))
+        for rank, (pid, score) in enumerate(trigrams_dict.get(key, Counter()).most_common(max_candidates), start=1):
+            if str(pid) not in seen:
+                add_reranker_candidate(candidates, pid, "trigram", score, rank, weight=3.0)
+
+    if last_cat and last_cat in cat2p:
+        for rank, (pid, score) in enumerate(cat2p[last_cat].most_common(max_candidates), start=1):
+            if str(pid) not in seen:
+                add_reranker_candidate(candidates, pid, "cat2p", score, rank, weight=1.5)
+
+    for anchor_pid in [str(pid) for pid in product_seq[-2:]]:
+        for rank, (pid, score) in enumerate(order_cooccur.get(anchor_pid, Counter()).most_common(max_candidates), start=1):
+            if str(pid) not in seen:
+                add_reranker_candidate(candidates, pid, "order", score, rank, weight=2.0)
+
+    if last_cat:
+        query = SLUG_TO_CAT_MAP.get(last_cat, last_cat)
+        for rank, pid in enumerate(search_products(query, n=max_candidates), start=1):
+            if str(pid) not in seen:
+                add_reranker_candidate(candidates, pid, "search", 1.0 / rank, rank, weight=0.5)
+
+    for rank, pid in enumerate(global_top[:max_candidates], start=1):
+        if str(pid) not in seen:
+            add_reranker_candidate(candidates, pid, "global", 1.0 / rank, rank, weight=0.1)
+
+    rows = sorted(
+        candidates.values(),
+        key=lambda row: (-row["candidate_base_score"], row["best_source_rank"], row["product_id"]),
+    )[:max_candidates]
+    last_product_id = product_seq[-1] if product_seq else None
+    session_hour = input_actions[-1][4] if input_actions else 0
+    session_dow = input_actions[-1][5] if input_actions else 0
+    session_month = input_actions[-1][6] if input_actions else 0
+    last_product_category = pid_to_cat.get(int(last_product_id)) if last_product_id is not None else None
+    last_product_super_category = RU_TO_SUPER_CATEGORY.get(last_product_category)
+    last_category_event = LATIN_TO_RU_CATEGORY.get(last_cat, SLUG_TO_CAT_MAP.get(last_cat)) if last_cat else None
+    last_super_category_event = RU_TO_SUPER_CATEGORY.get(last_category_event)
+
+    for rank, row in enumerate(rows, start=1):
+        pid = int(row["product_id"])
+        product_features = product_feature_map.get(pid, {})
+        main_category = pid_to_cat.get(pid)
+        main_super_category = RU_TO_SUPER_CATEGORY.get(main_category)
+        row.update({
+            "visit_id": str(session_id),
+            "label": int(str(pid) == str(target_pid)) if target_pid is not None else 0,
+            "candidate_rank": rank,
+            "session_length": len(product_seq),
+            "unique_products_in_session": len(set(product_seq)),
+            "last_product_id": str(last_product_id) if last_product_id is not None else "__missing__",
+            "brand": product_features.get("brand") or "__missing__",
+            "last_category_event": last_category_event or "__missing__",
+            "last_product_event_category": last_product_category or "__missing__",
+            "last_product_event_super_category": last_product_super_category or "__missing__",
+            "last_super_category_event": last_super_category_event or "__missing__",
+            "main_category": main_category or "__missing__",
+            "main_super_category": main_super_category or "__missing__",
+            "is_same_product_category": int(main_category == last_product_category),
+            "is_same_category": int(main_category == last_category_event),
+            "is_same_product_super_category": int(main_super_category == last_product_super_category),
+            "is_same_super_category": int(main_super_category == last_super_category_event),
+            "candidate_seen_in_session": int(str(pid) in seen),
+            "product_popularity": pid_to_pop.get(pid, 0.0),
+            "product_price_tier": pid_to_tier.get(pid, 0),
+            "product_category_idx": pid_to_cat_idx.get(pid, 0),
+            "last_product_to_candidate_p2p_score": float(p2p.get(str(last_product_id), {}).get(str(pid), 0.0)) / max(p2p_totals.get(str(last_product_id), 1), 1) if last_product_id is not None else 0.0,
+            "session_hour": session_hour,
+            "session_day_of_week": session_dow,
+            "session_month": session_month,
+        })
+        for price_col in RERANKER_PRICE_COLUMNS:
+            row[price_col] = product_features.get(price_col, 0.0)
+    return rows
+
+def evaluate_reranker_recall_at_6(candidate_df, pred_col):
+    hits = []
+    for _, group in candidate_df.sort_values(pred_col, ascending=False).groupby("visit_id", sort=False):
+        hits.append(int(group.head(6)["label"].max() > 0))
+    return float(np.mean(hits)) if hits else 0.0
+
+def evaluate_candidate_recall_at_6(candidate_df):
+    return evaluate_reranker_recall_at_6(candidate_df, "candidate_base_score")
+
+def build_reranker_candidate_frame(train_actions_df, gru_model, device, max_candidates):
+    print(f"\n[7.1] Building reranker validation candidates (top {max_candidates})...")
+    last_cat_by_train_visit = get_last_cat_from_merged(train_merged)
+    eligible = train_actions_df[train_actions_df["user_actions"].apply(len) >= 2].copy()
+    eligible["timestamp"] = pd.to_datetime(eligible["timestamp"])
+    eligible = eligible.sort_values("timestamp").tail(RERANKER_MAX_VALIDATION_SESSIONS)
+
+    rows = []
+    for _, row in tqdm(eligible.iterrows(), total=len(eligible), desc="Reranker candidates"):
+        actions = row["user_actions"]
+        input_actions = actions[:-1]
+        target_pid = actions[-1][1]
+        session_id = str(row["session_id"])
+        rows.extend(
+            build_candidate_rows_for_session(
+                session_id=session_id,
+                input_actions=input_actions,
+                target_pid=target_pid,
+                last_cat=last_cat_by_train_visit.get(session_id),
+                max_candidates=max_candidates,
+                gru_model=gru_model,
+                device=device,
+            )
+        )
+
+    candidate_df = pd.DataFrame(rows)
+    print(f"   Candidate rows: {len(candidate_df):,}")
+    if candidate_df.empty:
+        return candidate_df
+    print(f"   Candidate sessions: {candidate_df['visit_id'].nunique():,}")
+    print(f"   Positive labels: {candidate_df['label'].sum():,}")
+    print(f"   Candidate target coverage: {(candidate_df.groupby('visit_id')['label'].max().mean()):.4f}")
+    return candidate_df
+
+def prepare_reranker_features(candidate_df):
+    source_names = ["gru", "coocc", "p2p", "trigram", "cat2p", "order", "search", "global"]
+    for source in source_names:
+        for col, default in [
+            (f"is_from_{source}", 0),
+            (f"{source}_rank", 9999),
+            (f"{source}_score", 0.0),
+        ]:
+            if col not in candidate_df.columns:
+                candidate_df[col] = default
+
+    for price_col in RERANKER_PRICE_COLUMNS:
+        if price_col not in candidate_df.columns:
+            candidate_df[price_col] = 0.0
+        candidate_df[price_col] = candidate_df[price_col].fillna(0.0)
+        candidate_df[f"{price_col}_rank"] = candidate_df.groupby("visit_id")[price_col].rank(method="average")
+
+    candidate_df["candidate_base_score_rank"] = candidate_df.groupby("visit_id")["candidate_base_score"].rank(
+        method="average",
+        ascending=False,
+    )
+
+    cat_features = [
+        "product_id",
+        "brand",
+        "main_category",
+        "main_super_category",
+        "last_product_id",
+        "last_category_event",
+        "last_product_event_category",
+        "last_product_event_super_category",
+        "last_super_category_event",
+    ]
+    feature_columns = [
+        col
+        for col in candidate_df.columns
+        if col not in {"visit_id", "label"}
+    ]
+
+    for col in cat_features:
+        candidate_df[col] = candidate_df[col].fillna("__missing__").astype(str)
+
+    numeric_columns = [col for col in feature_columns if col not in cat_features]
+    candidate_df[numeric_columns] = candidate_df[numeric_columns].replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    return candidate_df, feature_columns, cat_features
+
+def train_catboost_reranker(candidate_df):
+    global reranker_feature_columns, reranker_cat_features, reranker_k_results, best_reranker_config, reranker_model_paths
+
+    if candidate_df.empty:
+        print("   Reranker skipped: no candidate rows")
+        return None
+
+    candidate_df, feature_columns, cat_features = prepare_reranker_features(candidate_df)
+    reranker_feature_columns = feature_columns
+    reranker_cat_features = cat_features
+
+    best_model = None
+    best_result = None
+    reranker_k_results = []
+    reranker_model_paths = {}
+
+    mlflow.set_experiment("two_stage_reranker")
+
+    for candidate_k in RERANKER_CANDIDATE_K_VALUES:
+        df_k = candidate_df[candidate_df["candidate_rank"] <= candidate_k].copy()
+        covered_sessions = df_k.groupby("visit_id")["label"].max()
+        train_visit_ids = covered_sessions[covered_sessions > 0].index
+        train_df = df_k[df_k["visit_id"].isin(train_visit_ids)].copy()
+
+        candidate_recall_at_6 = evaluate_candidate_recall_at_6(df_k)
+        target_coverage = float(covered_sessions.mean()) if len(covered_sessions) else 0.0
+
+        if train_df.empty or train_df["label"].sum() == 0:
+            result = {
+                "candidate_k": candidate_k,
+                "rows": int(len(df_k)),
+                "train_rows": 0,
+                "target_coverage": target_coverage,
+                "candidate_recall_at_6": candidate_recall_at_6,
+                "reranker_recall_at_6": 0.0,
+            }
+            reranker_k_results.append(result)
+            continue
+
+        model = cb.CatBoostRanker(
+            loss_function="YetiRankPairwise",
+            eval_metric="NDCG:top=6",
+            iterations=RERANKER_ITERATIONS,
+            learning_rate=RERANKER_LEARNING_RATE,
+            depth=RERANKER_DEPTH,
+            bootstrap_type="Bernoulli",
+            subsample=0.5,
+            sampling_unit="Group",
+            task_type="CPU",
+            random_seed=42,
+            verbose=False,
+        )
+        model.fit(
+            cb.Pool(
+                data=train_df[feature_columns],
+                label=train_df["label"],
+                group_id=train_df["visit_id"],
+                cat_features=cat_features,
+            )
+        )
+
+        ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+        model_path = ARTIFACTS_DIR / f"catboost_ranker_k_{candidate_k}.cbm"
+        model.save_model(str(model_path))
+        reranker_model_paths[str(candidate_k)] = str(model_path)
+
+        df_k["reranker_score"] = model.predict(df_k[feature_columns])
+        reranker_recall_at_6 = evaluate_reranker_recall_at_6(df_k, "reranker_score")
+
+        result = {
+            "candidate_k": candidate_k,
+            "rows": int(len(df_k)),
+            "train_rows": int(len(train_df)),
+            "target_coverage": target_coverage,
+            "candidate_recall_at_6": candidate_recall_at_6,
+            "reranker_recall_at_6": reranker_recall_at_6,
+            "model_path": str(model_path),
+        }
+        reranker_k_results.append(result)
+
+        with mlflow.start_run(run_name=f"catboost_reranker_k_{candidate_k}"):
+            mlflow.log_params({
+                "candidate_k": candidate_k,
+                "iterations": RERANKER_ITERATIONS,
+                "learning_rate": RERANKER_LEARNING_RATE,
+                "depth": RERANKER_DEPTH,
+                "max_validation_sessions": RERANKER_MAX_VALIDATION_SESSIONS,
+            })
+            mlflow.log_metrics({
+                "target_coverage": target_coverage,
+                "candidate_recall_at_6": candidate_recall_at_6,
+                "reranker_recall_at_6": reranker_recall_at_6,
+                "candidate_rows": len(df_k),
+                "train_rows": len(train_df),
+            })
+
+        print(
+            f"   K={candidate_k}: coverage={target_coverage:.4f} "
+            f"candidate_recall@6={candidate_recall_at_6:.4f} "
+            f"reranker_recall@6={reranker_recall_at_6:.4f}"
+        )
+
+        if best_result is None or reranker_recall_at_6 > best_result["reranker_recall_at_6"]:
+            best_result = result
+            best_model = model
+
+    if best_model is not None:
+        ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+        best_model_path = ARTIFACTS_DIR / "catboost_ranker.cbm"
+        best_model.save_model(str(best_model_path))
+        best_reranker_config = {
+            "best_candidate_k": best_result["candidate_k"],
+            "model_path": str(best_model_path),
+            "model_paths_by_k": reranker_model_paths,
+            "iterations": RERANKER_ITERATIONS,
+            "learning_rate": RERANKER_LEARNING_RATE,
+            "depth": RERANKER_DEPTH,
+        }
+        print(f"   ✅ Saved best CatBoost reranker to: {best_model_path}")
+    return best_model
 
 # ==============================================================================
 # 4. BUILD GLOBAL POPULARITY
@@ -1705,8 +2279,20 @@ gru_model.eval()
 print(f"   ✅ Temporal GRU Training Complete! Final best loss: {best_loss:.4f}")
 
 # ==============================================================================
-# 7. SAVE INFERENCE ARTIFACTS
+# 7. TWO-STAGE CATBOOST RERANKER
 # ==============================================================================
-print("\n[7/7] Saving inference artifacts...")
+max_reranker_candidates = max(RERANKER_CANDIDATE_K_VALUES)
+reranker_candidate_df = build_reranker_candidate_frame(
+    train_actions,
+    gru_model,
+    device,
+    max_candidates=max_reranker_candidates,
+)
+catboost_reranker = train_catboost_reranker(reranker_candidate_df)
+
+# ==============================================================================
+# 8. SAVE INFERENCE ARTIFACTS
+# ==============================================================================
+print("\n[8/8] Saving inference artifacts...")
 save_inference_artifacts()
 print("\nTraining complete. Run `uv run inference.py` to generate the submission file.")
