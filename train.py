@@ -45,38 +45,14 @@ CUTOFF_DATE = pd.Timestamp('2025-10-14') - pd.Timedelta(days=180)
 print(f"   📅 Recency Cutoff: {CUTOFF_DATE} (Last 6 Months)")
 
 # ==============================================================================
-# TEMPORAL FEATURE CONFIGURATION
+# TRAINING CONFIGURATION
 # ==============================================================================
-USE_DWELL_TIME = True
-USE_SESSION_ELAPSED = True
-USE_TIME_OF_DAY = True
-USE_DAY_OF_WEEK = True
-USE_TIME_DECAY = True
 USE_SAMPLE_WEIGHTING = True
-USE_MONTH = True
-USE_INTER_SESSION_GAP = True
-USE_PRODUCT_AGE = True
-USE_PRODUCT_RECENCY = True
-USE_PRODUCT_VELOCITY = True
-MAX_DWELL_SECONDS = 300   # Cap dwell time at 5 minutes
-MAX_SESSION_SECONDS = 3600  # Cap session elapsed at 1 hour
-MAX_GAP_DAYS = 365 * 2
-MAX_PRODUCT_AGE_DAYS = 365 * 4
-MAX_PRODUCT_RECENCY_DAYS = 365 * 4
-MAX_PRODUCT_VELOCITY = 10.0
+SAMPLE_WEIGHT_DECAY_RATE = 0.0004
 
-print(f"🧪 Temporal Features Configuration:")
-print(f"   Dwell Time: {USE_DWELL_TIME}")
-print(f"   Session Elapsed: {USE_SESSION_ELAPSED}")
-print(f"   Time of Day: {USE_TIME_OF_DAY}")
-print(f"   Day of Week: {USE_DAY_OF_WEEK}")
-print(f"   Time Decay: {USE_TIME_DECAY}")
+print(f"🧪 Training Configuration:")
 print(f"   Sample Weighting: {USE_SAMPLE_WEIGHTING}")
-print(f"   Month (Seasonality): {USE_MONTH}")
-print(f"   Inter-session Gap: {USE_INTER_SESSION_GAP}")
-print(f"   Product Age: {USE_PRODUCT_AGE}")
-print(f"   Product Recency: {USE_PRODUCT_RECENCY}")
-print(f"   Product Velocity: {USE_PRODUCT_VELOCITY}")
+print(f"   Sample Weight Decay Rate: {SAMPLE_WEIGHT_DECAY_RATE}")
 
 def save_pickle_artifact(name, value):
     path = ARTIFACTS_DIR / name
@@ -98,22 +74,15 @@ def save_inference_artifacts():
         "cat2idx.pkl": cat2idx,
         "pid_to_cat_idx.pkl": pid_to_cat_idx,
         "pid_to_tier.pkl": pid_to_tier,
-        "pid_to_pop.pkl": pid_to_pop,
         "pid2idx.pkl": pid2idx,
         "idx2pid.pkl": idx2pid,
-        "product_first_seen.pkl": product_first_seen,
-        "product_last_seen.pkl": product_last_seen,
-        "product_recency.pkl": product_recency,
-        "velocity_by_pid.pkl": velocity_by_pid,
         "p2p.pkl": dict(p2p),
-        "p2p_totals.pkl": p2p_totals,
         "coocc.pkl": dict(coocc),
         "trigrams_dict.pkl": dict(trigrams_dict),
         "cat2p.pkl": dict(cat2p),
         "order_cooccur.pkl": dict(order_cooccur),
         "search_index.pkl": dict(search_index),
         "slug_to_cat_map.pkl": SLUG_TO_CAT_MAP,
-        "visit_gap_map.pkl": visit_gap_map,
     }
 
     for name, value in pickle_artifacts.items():
@@ -126,27 +95,10 @@ def save_inference_artifacts():
         "w_new": W_NEW,
         "session_tolerance": str(SESSION_TOLERANCE),
         "cutoff_date": str(CUTOFF_DATE),
-        "use_dwell_time": USE_DWELL_TIME,
-        "use_session_elapsed": USE_SESSION_ELAPSED,
-        "use_time_of_day": USE_TIME_OF_DAY,
-        "use_day_of_week": USE_DAY_OF_WEEK,
-        "use_time_decay": USE_TIME_DECAY,
         "use_sample_weighting": USE_SAMPLE_WEIGHTING,
-        "use_month": USE_MONTH,
-        "use_inter_session_gap": USE_INTER_SESSION_GAP,
-        "use_product_age": USE_PRODUCT_AGE,
-        "use_product_recency": USE_PRODUCT_RECENCY,
-        "use_product_velocity": USE_PRODUCT_VELOCITY,
-        "max_dwell_seconds": MAX_DWELL_SECONDS,
-        "max_session_seconds": MAX_SESSION_SECONDS,
-        "max_gap_days": MAX_GAP_DAYS,
-        "max_product_age_days": MAX_PRODUCT_AGE_DAYS,
-        "max_product_recency_days": MAX_PRODUCT_RECENCY_DAYS,
-        "max_product_velocity": MAX_PRODUCT_VELOCITY,
+        "sample_weight_decay_rate": SAMPLE_WEIGHT_DECAY_RATE,
         "num_items": num_items,
         "num_categories": num_categories,
-        "velocity_mean": velocity_mean,
-        "global_max_date": GLOBAL_MAX_DATE,
     }
     metadata = {
         "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
@@ -383,234 +335,44 @@ def count_product_views(actions):
     return sum(1 for typ, _ in actions if typ == "product")
 
 # ==============================================================================
-# NEW: TIME FEATURE HELPERS
+# GRU FEATURE HELPERS
 # ==============================================================================
 
-def log_norm(value, max_value):
-    if max_value <= 0:
-        return 0.0
-    value = max(0.0, min(float(value), float(max_value)))
-    return np.log1p(value) / np.log1p(max_value)
-
-
-def compute_product_time_stats(hits_paths, slug_map, chunk_size=500000):
-    daily_counts = Counter()
-    first_seen = {}
-    last_seen = {}
-    global_max_date = None
-
-    cols_time = ['date_time', 'slug', 'page_type']
-    for hits_path in hits_paths:
-        for chunk in [pd.read_parquet(hits_path, columns=cols_time)]:
-            chunk['date'] = pd.to_datetime(chunk['date_time'], errors='coerce').dt.date
-            chunk = chunk.dropna(subset=['date', 'slug'])
-            chunk = chunk[chunk['page_type'] == 'PRODUCT']
-            if chunk.empty:
-                continue
-            chunk['pid'] = chunk['slug'].map(slug_map)
-            chunk = chunk.dropna(subset=['pid'])
-            if chunk.empty:
-                continue
-            chunk['pid'] = chunk['pid'].astype(int)
-
-            grouped = chunk.groupby(['date', 'pid']).size()
-            for (d, pid), cnt in grouped.items():
-                daily_counts[(d, pid)] += int(cnt)
-
-            per_pid_dates = chunk.groupby('pid')['date'].agg(['min', 'max'])
-            for pid, row in per_pid_dates.iterrows():
-                dmin = row['min']
-                dmax = row['max']
-                if pid not in first_seen or dmin < first_seen[pid]:
-                    first_seen[pid] = dmin
-                if pid not in last_seen or dmax > last_seen[pid]:
-                    last_seen[pid] = dmax
-
-            max_date_chunk = chunk['date'].max()
-            if global_max_date is None or max_date_chunk > global_max_date:
-                global_max_date = max_date_chunk
-
-    velocity_by_pid = {}
-    velocity_mean = 1.0
-    max_age_days = 0
-    max_recency_days = 0
-
-    if daily_counts:
-        df = pd.DataFrame(
-            [(d, pid, cnt) for (d, pid), cnt in daily_counts.items()],
-            columns=['date', 'pid', 'cnt']
-        ).sort_values('date')
-        pivot = df.pivot_table(index='date', columns='pid', values='cnt', fill_value=0)
-        roll3 = pivot.rolling(3, min_periods=1).mean()
-        roll14 = pivot.rolling(14, min_periods=1).mean()
-        velocity = roll3 / (roll14 + 1e-6)
-        velocity = velocity.clip(upper=MAX_PRODUCT_VELOCITY)
-
-        velocity_vals = velocity.to_numpy().flatten()
-        velocity_vals = velocity_vals[~np.isnan(velocity_vals)]
-        if velocity_vals.size > 0:
-            velocity_mean = float(np.nanmean(velocity_vals))
-
-        for pid in velocity.columns:
-            velocity_by_pid[int(pid)] = velocity[pid].to_dict()
-
-    if global_max_date is None:
-        global_max_date = pd.Timestamp('1970-01-01').date()
-
-    product_recency = {}
-    for pid, dmin in first_seen.items():
-        age_days = (global_max_date - dmin).days
-        if age_days > max_age_days:
-            max_age_days = age_days
-    for pid, dmax in last_seen.items():
-        recency_days = (global_max_date - dmax).days
-        product_recency[pid] = recency_days
-        if recency_days > max_recency_days:
-            max_recency_days = recency_days
-
-    return {
-        'first_seen': first_seen,
-        'last_seen': last_seen,
-        'recency': product_recency,
-        'velocity_by_pid': velocity_by_pid,
-        'velocity_mean': velocity_mean,
-        'global_max_date': global_max_date,
-        'max_age_days': max_age_days,
-        'max_recency_days': max_recency_days,
-    }
-
-
-def compute_visit_gap_map(visit_paths):
-    visits_list = []
-    for vp in visit_paths:
-        df = pd.read_parquet(vp, columns=['visit_id', 'client_id', 'date_time'])
-        df['date_time'] = pd.to_datetime(df['date_time'], errors='coerce')
-        df = df.dropna(subset=['date_time', 'client_id', 'visit_id'])
-        df = df.rename(columns={'date_time': 'visit_start'})
-        visits_list.append(df)
-    visits = pd.concat(visits_list, ignore_index=True)
-    visits = visits.sort_values(['client_id', 'visit_start'])
-    visits['prev_start'] = visits.groupby('client_id')['visit_start'].shift(1)
-    visits['gap_days'] = (visits['visit_start'] - visits['prev_start']).dt.total_seconds() / 86400.0
-    visits['gap_days'] = visits['gap_days'].fillna(0.0)
-    return dict(zip(visits['visit_id'].astype(str), visits['gap_days'].astype(float)))
-# ==============================================================================
-# TEMPORAL HELPER FUNCTIONS (from baseline_gru_temporal.py)
-# ==============================================================================
-
-def deduplicate_consecutive_with_temporal(actions):
-    """Deduplicate consecutive items and aggregate dwell times, keep first elapsed."""
+def deduplicate_consecutive_gru_actions(actions):
+    """Deduplicate consecutive product actions for GRU training."""
     if not actions:
         return []
-    # actions: [(type, pid, dwell, elapsed, hour, dow, month, gap, age, recency, velocity,
-    #            tier_idx, pop_score, not_bounce, cat_idx), ...]
     deduped = [actions[0]]
     for i in range(1, len(actions)):
-        (curr_type, curr_pid, curr_dwell, curr_elapsed, curr_hour, curr_dow,
-         curr_month, curr_gap, curr_age, curr_recency, curr_velocity,
-         curr_tier, curr_pop, curr_nb, curr_cat) = actions[i]
-        (prev_type, prev_pid, prev_dwell, prev_elapsed, prev_hour, prev_dow,
-         prev_month, prev_gap, prev_age, prev_recency, prev_velocity,
-         prev_tier, prev_pop, prev_nb, prev_cat) = deduped[-1]
-        if curr_type == prev_type and curr_pid == prev_pid:
-            # Same item - aggregate dwell time, keep first elapsed/hour/dow
-            deduped[-1] = (
-                prev_type, prev_pid, prev_dwell + curr_dwell, prev_elapsed, prev_hour, prev_dow,
-                prev_month, prev_gap, prev_age, prev_recency, prev_velocity,
-                prev_tier, prev_pop, max(prev_nb, curr_nb), prev_cat
-            )
-        else:
+        if actions[i][1] != deduped[-1][1]:
             deduped.append(actions[i])
     return deduped
 
-def extract_actions_with_temporal(
+def extract_gru_actions(
     merged_df,
     slug_map,
-    visit_gap_map,
-    product_first_seen,
-    product_recency,
-    velocity_by_pid,
-    velocity_mean,
     pid_to_tier,
-    pid_to_pop,
     pid_to_cat_idx,
 ):
-    """Extract action sequences with dwell time and session elapsed from merged dataframe."""
+    """Extract compact product sequences for the GRU: product, price tier, category."""
     relevant = merged_df[merged_df['page_type'] == 'PRODUCT'].copy()
     relevant = relevant.dropna(subset=['visit_id', 'slug'])
     relevant['product_id'] = relevant['slug'].map(slug_map)
     relevant = relevant.dropna(subset=['product_id'])
 
     results = []
-    missing_first_seen = 0
-    missing_recency = 0
-    missing_velocity = 0
     for visit_id, group in relevant.groupby('visit_id'):
         sorted_group = group.sort_values('date_time').reset_index(drop=True)
         actions = []
-        timestamps = sorted_group['date_time'].tolist()
         pids = sorted_group['product_id'].tolist()
-        if 'not_bounce' in sorted_group.columns:
-            not_bounce_vals = sorted_group['not_bounce'].fillna(0).astype(int).tolist()
-        else:
-            not_bounce_vals = [0] * len(pids)
-        session_start = timestamps[0]
-        gap_days = visit_gap_map.get(str(visit_id), 0.0) if USE_INTER_SESSION_GAP else 0.0
 
-        for i in range(len(pids)):
-            # Dwell time = time until next action (or 0 for last)
-            if i < len(timestamps) - 1:
-                dwell_seconds = (timestamps[i+1] - timestamps[i]).total_seconds()
-                dwell_seconds = min(max(dwell_seconds, 0), MAX_DWELL_SECONDS)
-            else:
-                dwell_seconds = 0
-            # Session elapsed = time since session start
-            elapsed_seconds = (timestamps[i] - session_start).total_seconds()
-            elapsed_seconds = min(max(elapsed_seconds, 0), MAX_SESSION_SECONDS)
-            # Time of Day (Hour)
-            hour = timestamps[i].hour
-            # Day of Week (0=Monday, 6=Sunday)
-            dow = timestamps[i].dayofweek
-            # Month (1-12)
-            month = timestamps[i].month
-
-            pid = int(pids[i])
-            action_date = timestamps[i].date()
-
-            # Product age (days since first seen)
-            first_seen_date = product_first_seen.get(pid)
-            if first_seen_date is None:
-                missing_first_seen += 1
-                age_days = 0.0
-            else:
-                age_days = (action_date - first_seen_date).days
-                age_days = max(age_days, 0.0)
-
-            # Product recency (days since last seen, as of global max date)
-            recency_days = product_recency.get(pid)
-            if recency_days is None:
-                missing_recency += 1
-                recency_days = 0.0
-
-            # Product velocity (short-term / mid-term)
-            velocity = velocity_by_pid.get(pid, {}).get(action_date)
-            if velocity is None:
-                missing_velocity += 1
-                velocity = velocity_mean
-
+        for pid in pids:
+            pid = int(pid)
             tier_idx = pid_to_tier.get(pid, 0)
-            pop_score = pid_to_pop.get(pid, 0.0)
-            not_bounce = int(not_bounce_vals[i]) if i < len(not_bounce_vals) else 0
             cat_idx = pid_to_cat_idx.get(pid, 0)
+            actions.append(('product', pid, tier_idx, cat_idx))
 
-            actions.append((
-                'product', pid, dwell_seconds, elapsed_seconds, hour, dow, month,
-                gap_days, age_days, recency_days, velocity,
-                tier_idx, pop_score, not_bounce, cat_idx
-            ))
-
-        # Apply consecutive deduplication
-        actions = deduplicate_consecutive_with_temporal(actions)
+        actions = deduplicate_consecutive_gru_actions(actions)
 
         if actions:
             results.append({
@@ -619,63 +381,20 @@ def extract_actions_with_temporal(
                 'timestamp': sorted_group['date_time'].iloc[0]
             })
 
-    if missing_first_seen or missing_recency or missing_velocity:
-        print(f"   Missing first_seen: {missing_first_seen:,} | recency: {missing_recency:,} | velocity: {missing_velocity:,}")
-
     return pd.DataFrame(results)
 
-def encode_sequence_with_temporal(actions, pid2idx, p2p=None, p2p_totals=None):
-    """Encode sequence with all temporal features + product metadata + transition strength."""
+def encode_sequence_for_gru(actions, pid2idx):
+    """Encode product actions as token, price tier, and category indices."""
     result = []
-    T = len(actions)
-    for i, (typ, pid, dwell, elapsed, hour, dow, month, gap_days, age_days, recency_days, velocity,
-            tier_idx, pop_score, not_bounce, cat_idx) in enumerate(actions):
+    for typ, pid, tier_idx, cat_idx in actions:
         token_id = pid2idx.get(pid, 0)
         if token_id > 0:
-            # 1. Normalize dwell time
-            norm_dwell = np.log1p(dwell) / np.log1p(MAX_DWELL_SECONDS)
-            # 2. Normalize elapsed time
-            norm_elapsed = np.log1p(elapsed) / np.log1p(MAX_SESSION_SECONDS)
-            # 3. Time of Day (Cyclical)
-            hour_sin = np.sin(2 * np.pi * hour / 24.0)
-            hour_cos = np.cos(2 * np.pi * hour / 24.0)
-            # 4. Day of Week (Embedding index 0-6)
-            dow_idx = dow
-            # 5. Month (Cyclical)
-            month_sin = np.sin(2 * np.pi * month / 12.0) if USE_MONTH else 0.0
-            month_cos = np.cos(2 * np.pi * month / 12.0) if USE_MONTH else 0.0
-            # 6. Inter-session gap
-            gap_norm = log_norm(gap_days, MAX_GAP_DAYS) if USE_INTER_SESSION_GAP else 0.0
-            # 7. Product age
-            age_norm = log_norm(age_days, MAX_PRODUCT_AGE_DAYS) if USE_PRODUCT_AGE else 0.0
-            # 8. Product recency
-            recency_norm = log_norm(recency_days, MAX_PRODUCT_RECENCY_DAYS) if USE_PRODUCT_RECENCY else 0.0
-            # 9. Product velocity
-            vel_norm = log_norm(velocity, MAX_PRODUCT_VELOCITY) if USE_PRODUCT_VELOCITY else 0.0
-            # 10. Time Decay (Positional) -- exp(-decay * distance_from_end)
-            decay = np.exp(-0.1 * (T - 1 - i))
-
-            # 11. P2P transition strength from previous item (normalized)
-            p2p_score = 0.0
-            if p2p is not None and p2p_totals is not None and i > 0:
-                prev_pid = actions[i - 1][1]
-                prev_key = str(prev_pid)
-                curr_key = str(pid)
-                count = p2p.get(prev_key, {}).get(curr_key, 0)
-                total = p2p_totals.get(prev_key, 0)
-                if total > 0:
-                    p2p_score = float(count) / float(total)
-
-            result.append((
-                token_id, norm_dwell, norm_elapsed, hour_sin, hour_cos, dow_idx,
-                month_sin, month_cos, gap_norm, age_norm, recency_norm, vel_norm, decay,
-                int(tier_idx), float(pop_score), float(p2p_score), float(not_bounce), int(cat_idx)
-            ))
+            result.append((token_id, int(tier_idx), int(cat_idx)))
     return result
 
-def encode_with_age(actions, session_ts, pid2idx, max_date, p2p=None, p2p_totals=None):
+def encode_with_age(actions, session_ts, pid2idx, max_date):
     """Return (encoded_seq, days_old)."""
-    enc_seq = encode_sequence_with_temporal(actions, pid2idx, p2p=p2p, p2p_totals=p2p_totals)
+    enc_seq = encode_sequence_for_gru(actions, pid2idx)
     days_old = (max_date - session_ts).days
     return (enc_seq, days_old)
 
@@ -683,26 +402,19 @@ def summarize_action_features(df, label):
     """Lightweight feature coverage summary for debugging."""
     total = 0
     tier_nonzero = 0
-    pop_nonzero = 0
-    nb_nonzero = 0
     cat_nonzero = 0
     for actions in df['user_actions']:
         for a in actions:
             total += 1
-            if a[11] > 0:
+            if a[2] > 0:
                 tier_nonzero += 1
-            if a[12] > 0:
-                pop_nonzero += 1
-            if a[13] > 0:
-                nb_nonzero += 1
-            if a[14] > 0:
+            if a[3] > 0:
                 cat_nonzero += 1
     if total == 0:
         print(f"   {label} feature coverage -- no actions")
         return
     print(
         f"   {label} feature coverage -- tier:{tier_nonzero/total:.1%} "
-        f"pop:{pop_nonzero/total:.1%} not_bounce:{nb_nonzero/total:.1%} "
         f"cat:{cat_nonzero/total:.1%}"
     )
 
@@ -786,33 +498,6 @@ print(f"   Products with categories: {len(pid_to_cat):,}")
 print(f"   Products with price tiers: {len(pid_to_tier):,}")
 print(f"   Unique categories: {num_categories}")
 print(f"   products_all rows: {total_products_all:,}")
-
-# ==============================================================================
-# 1.1 BUILD PRODUCT TIME FEATURES (Train + Test Hits)
-# ==============================================================================
-print("\n[1.1/8] Building Product Time Features...")
-time_stats = compute_product_time_stats(
-    [f'{DATA_DIR}/metrika_hits.parquet', f'{DATA_DIR}/metrika_hits_test.parquet'],
-    slug_map,
-    chunk_size=500000
-)
-product_first_seen = time_stats['first_seen']
-product_last_seen = time_stats['last_seen']
-product_recency = time_stats['recency']
-velocity_by_pid = time_stats['velocity_by_pid']
-velocity_mean = time_stats['velocity_mean']
-GLOBAL_MAX_DATE = time_stats['global_max_date']
-
-if time_stats['max_age_days'] > 0:
-    MAX_PRODUCT_AGE_DAYS = min(MAX_PRODUCT_AGE_DAYS, time_stats['max_age_days'])
-if time_stats['max_recency_days'] > 0:
-    MAX_PRODUCT_RECENCY_DAYS = min(MAX_PRODUCT_RECENCY_DAYS, time_stats['max_recency_days'])
-
-print(f"   Products with first_seen: {len(product_first_seen):,}")
-print(f"   Products with last_seen: {len(product_last_seen):,}")
-print(f"   Velocity mean: {velocity_mean:.3f}")
-print(f"   Max product age days (cap): {MAX_PRODUCT_AGE_DAYS}")
-print(f"   Max product recency days (cap): {MAX_PRODUCT_RECENCY_DAYS}")
 
 # ==============================================================================
 # 2. LEARN CATEGORY MAPPINGS
@@ -923,13 +608,6 @@ global_top = [str(x) for x, _ in global_cnt.most_common(50)]
 print(f"   Unique popular products: {len(global_cnt):,}")
 print(f"   Top-50 fallback items loaded")
 
-# Build per-product popularity score (log-normalized)
-max_pop = max(global_cnt.values()) if global_cnt else 1.0
-pid_to_pop = {int(pid): log_norm(cnt, max_pop) for pid, cnt in global_cnt.items()}
-if pid_to_pop:
-    pop_vals = list(pid_to_pop.values())
-    print(f"   Pop score range: {min(pop_vals):.4f} - {max(pop_vals):.4f}")
-
 # ==============================================================================
 # 5. BUILD TRAIN SESSIONS USING MERGE_ASOF (NEW APPROACH)
 # ==============================================================================
@@ -1025,12 +703,6 @@ print(f"   P2P total transitions: {total_p2p_transitions:,}")
 print(f"   Trigram keys (unique bigrams): {len(trigrams_dict):,}")
 print(f"   Trigram total transitions: {total_trigram_transitions:,}")
 
-# Precompute totals for normalized p2p transition strength
-p2p_totals = {k: sum(v.values()) for k, v in p2p.items()}
-if p2p_totals:
-    totals = np.array(list(p2p_totals.values()), dtype=float)
-    print(f"   P2P totals -- Mean: {totals.mean():.1f} | Max: {totals.max():.0f}")
-
 # ==============================================================================
 # 6.2 BUILD BEHAVIORAL CATEGORY-TO-PRODUCT (cat2p) (last 6 months train + test)
 # ==============================================================================
@@ -1104,47 +776,27 @@ print(f"   Order co-occurrence anchors: {len(order_cooccur):,}")
 print(f"   Order co-occurrence pairs: {total_order_pairs:,}")
 
 # ==============================================================================
-# 6.5 GRU TRAINING DATA WITH TEMPORAL FEATURES
+# 6.5 GRU TRAINING DATA
 # ==============================================================================
-print("\n[6.5/8] Building GRU Training Data with Temporal Features...")
+print("\n[6.5/8] Building GRU Training Data...")
 
-print("   Computing inter-session gaps...")
-visit_gap_map = compute_visit_gap_map(
-    [f'{DATA_DIR}/metrika_visits.parquet', f'{DATA_DIR}/metrika_visits_test.parquet']
-)
-if visit_gap_map:
-    gap_vals = np.array(list(visit_gap_map.values()), dtype=float)
-    print(f"   Gap days -- Mean: {gap_vals.mean():.2f} | Median: {np.median(gap_vals):.2f} | Max: {gap_vals.max():.2f}")
-
-print("   Extracting train actions with temporal features...")
-train_actions = extract_actions_with_temporal(
+print("   Extracting train GRU actions...")
+train_actions = extract_gru_actions(
     train_merged,
     slug_map,
-    visit_gap_map,
-    product_first_seen,
-    product_recency,
-    velocity_by_pid,
-    velocity_mean,
     pid_to_tier,
-    pid_to_pop,
     pid_to_cat_idx,
 )
 
-print("   Extracting test actions with temporal features...")
-test_actions = extract_actions_with_temporal(
+print("   Extracting test GRU actions...")
+test_actions = extract_gru_actions(
     test_merged,
     slug_map,
-    visit_gap_map,
-    product_first_seen,
-    product_recency,
-    velocity_by_pid,
-    velocity_mean,
     pid_to_tier,
-    pid_to_pop,
     pid_to_cat_idx,
 )
-print(f"   Train temporal sessions: {len(train_actions):,}")
-print(f"   Test temporal sessions: {len(test_actions):,}")
+print(f"   Train GRU sessions: {len(train_actions):,}")
+print(f"   Test GRU sessions: {len(test_actions):,}")
 summarize_action_features(train_actions, "Train")
 summarize_action_features(test_actions, "Test")
 
@@ -1176,8 +828,8 @@ idx2pid = {i: pid for pid, i in pid2idx.items()}
 num_items = len(pid2idx)
 print(f"   Products: {num_items}")
 
-# Encode sequences with temporal features + session age for sample weighting
-print("\nEncoding sequences with temporal features...")
+# Encode sequences + session age for sample weighting
+print("\nEncoding GRU sequences...")
 max_date = train_merged['visit_start'].max()
 gru_train_data['timestamp'] = pd.to_datetime(gru_train_data['timestamp'])
 
@@ -1188,8 +840,6 @@ for _, row in gru_train_data.iterrows():
         row['timestamp'],
         pid2idx,
         max_date,
-        p2p=p2p,
-        p2p_totals=p2p_totals
     )
     if len(seq_data[0]) >= 2:
         gru_sequences.append(seq_data)
@@ -1197,14 +847,6 @@ for _, row in gru_train_data.iterrows():
 ages = [s[1] for s in gru_sequences]
 print(f"   Encoded sequences: {len(gru_sequences):,}")
 print(f"   Session age -- Mean: {np.mean(ages):.0f} days | Min: {min(ages)} | Max: {max(ages)}")
-if gru_sequences:
-    p2p_vals = []
-    for seq, _ in gru_sequences[:200]:
-        for row in seq:
-            p2p_vals.append(row[15])
-    if p2p_vals:
-        p2p_vals = np.array(p2p_vals, dtype=float)
-        print(f"   P2P score sample -- Mean: {p2p_vals.mean():.4f} | Max: {p2p_vals.max():.4f}")
 
 # ==============================================================================
 # TEMPORAL GRU MODEL + TRAINING
@@ -1212,7 +854,7 @@ if gru_sequences:
 print("\nTraining Temporal GRU Model...")
 
 class TemporalSessionDataset(Dataset):
-    """Dataset of sessions with temporal features and session age."""
+    """Dataset of compact GRU sessions and session age."""
     def __init__(self, sessions, min_len=2):
         self.sessions = [s for s in sessions if len(s[0]) >= min_len]
 
@@ -1223,25 +865,12 @@ class TemporalSessionDataset(Dataset):
         return self.sessions[i]
 
 def collate_temporal_sequences(batch):
-    """Collate sequences with dwell time, elapsed time, and sample weights."""
+    """Collate compact GRU sequences with sample weights."""
     valid_batch = [s for s in batch if len(s[0]) >= 2]
     if not valid_batch:
         return (
             torch.zeros((1, 1), dtype=torch.long),
-            torch.zeros((1, 1), dtype=torch.float),
-            torch.zeros((1, 1), dtype=torch.float),
-            torch.zeros((1, 1, 2), dtype=torch.float),
             torch.zeros((1, 1), dtype=torch.long),
-            torch.zeros((1, 1, 2), dtype=torch.float),
-            torch.zeros((1, 1), dtype=torch.float),
-            torch.zeros((1, 1), dtype=torch.float),
-            torch.zeros((1, 1), dtype=torch.float),
-            torch.zeros((1, 1), dtype=torch.float),
-            torch.zeros((1, 1), dtype=torch.float),
-            torch.zeros((1, 1), dtype=torch.long),
-            torch.zeros((1, 1), dtype=torch.float),
-            torch.zeros((1, 1), dtype=torch.float),
-            torch.zeros((1, 1), dtype=torch.float),
             torch.zeros((1, 1), dtype=torch.long),
             torch.zeros((1, 1), dtype=torch.long),
             torch.zeros((1,), dtype=torch.float)
@@ -1252,58 +881,26 @@ def collate_temporal_sequences(batch):
     T = max_len - 1
 
     x = torch.full((B, T), PAD_IDX, dtype=torch.long)
-    dwell = torch.zeros((B, T), dtype=torch.float)
-    elapsed = torch.zeros((B, T), dtype=torch.float)
-    hour = torch.zeros((B, T, 2), dtype=torch.float)
-    dow = torch.zeros((B, T), dtype=torch.long)
-    month = torch.zeros((B, T, 2), dtype=torch.float)
-    gap = torch.zeros((B, T), dtype=torch.float)
-    age = torch.zeros((B, T), dtype=torch.float)
-    recency = torch.zeros((B, T), dtype=torch.float)
-    velocity = torch.zeros((B, T), dtype=torch.float)
-    decay = torch.zeros((B, T), dtype=torch.float)
     tier = torch.zeros((B, T), dtype=torch.long)
-    pop = torch.zeros((B, T), dtype=torch.float)
-    p2p_score = torch.zeros((B, T), dtype=torch.float)
-    not_bounce = torch.zeros((B, T), dtype=torch.float)
     cat = torch.zeros((B, T), dtype=torch.long)
     y = torch.full((B, T), PAD_IDX, dtype=torch.long)
     sample_weights = torch.ones((B,), dtype=torch.float)
-
-    # Sample weight decay rate
-    decay_rate = 0.0004
 
     for i, (seq, days_old) in enumerate(valid_batch):
         L = len(seq)
 
         # Calculate sample weight
         if USE_SAMPLE_WEIGHTING:
-            weight = np.exp(-decay_rate * days_old)
+            weight = np.exp(-SAMPLE_WEIGHT_DECAY_RATE * days_old)
             sample_weights[i] = float(weight)
 
         for t in range(L - 1):
             x[i, t] = seq[t][0]       # token_id
-            dwell[i, t] = seq[t][1]   # norm_dwell
-            elapsed[i, t] = seq[t][2] # norm_elapsed
-            hour[i, t, 0] = seq[t][3] # hour_sin
-            hour[i, t, 1] = seq[t][4] # hour_cos
-            dow[i, t] = seq[t][5]     # dow_idx
-            month[i, t, 0] = seq[t][6]  # month_sin
-            month[i, t, 1] = seq[t][7]  # month_cos
-            gap[i, t] = seq[t][8]       # gap_norm
-            age[i, t] = seq[t][9]       # age_norm
-            recency[i, t] = seq[t][10]  # recency_norm
-            velocity[i, t] = seq[t][11] # velocity_norm
-            decay[i, t] = seq[t][12]    # time_decay
-            tier[i, t] = seq[t][13]     # price tier idx
-            pop[i, t] = seq[t][14]      # popularity score
-            p2p_score[i, t] = seq[t][15]  # p2p transition strength
-            not_bounce[i, t] = seq[t][16] # not_bounce flag
-            cat[i, t] = seq[t][17]      # category idx
+            tier[i, t] = seq[t][1]    # price tier idx
+            cat[i, t] = seq[t][2]     # category idx
             y[i, t] = seq[t + 1][0]     # next token_id
 
-    return (x, dwell, elapsed, hour, dow, month, gap, age, recency, velocity, decay,
-            tier, pop, p2p_score, not_bounce, cat, y, sample_weights)
+    return x, tier, cat, y, sample_weights
 
 class GRURecDual(nn.Module):
     """Dual-path GRU: item path + category path."""
@@ -1318,36 +915,10 @@ class GRURecDual(nn.Module):
         cat_hidden_dim=96,
         num_layers=1,
         dropout=0.2,
-        use_dwell=True,
-        use_elapsed=True,
-        use_tod=True,
-        use_dow=True,
-        use_decay=True,
-        use_month=True,
-        use_gap=True,
-        use_age=True,
-        use_recency=True,
-        use_velocity=True,
-        use_pop=True,
-        use_p2p=True,
-        use_not_bounce=True,
     ):
         super().__init__()
         self.num_items = num_items
         self.num_categories = num_categories
-        self.use_dwell = use_dwell
-        self.use_elapsed = use_elapsed
-        self.use_tod = use_tod
-        self.use_dow = use_dow
-        self.use_decay = use_decay
-        self.use_month = use_month
-        self.use_gap = use_gap
-        self.use_age = use_age
-        self.use_recency = use_recency
-        self.use_velocity = use_velocity
-        self.use_pop = use_pop
-        self.use_p2p = use_p2p
-        self.use_not_bounce = use_not_bounce
 
         self.item_emb = nn.Embedding(num_items + 1, item_emb_dim, padding_idx=PAD_IDX)
         nn.init.xavier_uniform_(self.item_emb.weight.data)
@@ -1358,25 +929,7 @@ class GRURecDual(nn.Module):
         # Category embedding for dual path
         self.cat_emb = nn.Embedding(num_categories + 1, cat_emb_dim, padding_idx=PAD_IDX)
 
-        # Day of week embedding (7 days, dim=4)
-        if use_dow:
-            self.dow_emb = nn.Embedding(7, 4)
-
-        # Input dim calculation
         in_dim = item_emb_dim + tier_emb_dim
-        if use_dwell: in_dim += 1
-        if use_elapsed: in_dim += 1
-        if use_tod: in_dim += 2   # sin + cos
-        if use_dow: in_dim += 4   # embedding
-        if use_month: in_dim += 2
-        if use_gap: in_dim += 1
-        if use_age: in_dim += 1
-        if use_recency: in_dim += 1
-        if use_velocity: in_dim += 1
-        if use_decay: in_dim += 1
-        if use_pop: in_dim += 1
-        if use_p2p: in_dim += 1
-        if use_not_bounce: in_dim += 1
 
         self.item_proj = nn.Sequential(
             nn.Linear(in_dim, hidden_dim),
@@ -1412,73 +965,17 @@ class GRURecDual(nn.Module):
         self,
         x,
         tier=None,
-        pop=None,
-        p2p_score=None,
-        not_bounce=None,
         cat=None,
-        dwell=None,
-        elapsed=None,
-        hour=None,
-        dow=None,
-        month=None,
-        gap=None,
-        age=None,
-        recency=None,
-        velocity=None,
-        decay=None,
     ):
         """
         x: (B, T) token indices
         tier: (B, T) price tier indices
-        pop: (B, T) popularity score
-        p2p_score: (B, T) transition strength
-        not_bounce: (B, T) not-bounce flag
         cat: (B, T) category indices
-        dwell: (B, T) normalized dwell times
-        elapsed: (B, T) normalized elapsed times
-        hour: (B, T, 2) sin, cos
-        dow: (B, T) day of week index
-        month: (B, T, 2) month sin/cos
-        gap: (B, T) inter-session gap (normalized)
-        age: (B, T) product age (normalized)
-        recency: (B, T) product recency (normalized)
-        velocity: (B, T) product velocity (normalized)
-        decay: (B, T) time decay weights
         """
         e = self.item_emb(x)  # (B, T, E)
         t = self.tier_emb(tier) if tier is not None else torch.zeros_like(e[..., :0])
 
-        feats_list = [e, t]
-        if self.use_dwell and dwell is not None:
-            feats_list.append(dwell.unsqueeze(-1))
-        if self.use_elapsed and elapsed is not None:
-            feats_list.append(elapsed.unsqueeze(-1))
-        if self.use_tod and hour is not None:
-            feats_list.append(hour)
-        if self.use_dow and dow is not None:
-            d = self.dow_emb(dow)
-            feats_list.append(d)
-        if self.use_month and month is not None:
-            feats_list.append(month)
-        if self.use_gap and gap is not None:
-            feats_list.append(gap.unsqueeze(-1))
-        if self.use_age and age is not None:
-            feats_list.append(age.unsqueeze(-1))
-        if self.use_recency and recency is not None:
-            feats_list.append(recency.unsqueeze(-1))
-        if self.use_velocity and velocity is not None:
-            feats_list.append(velocity.unsqueeze(-1))
-        if self.use_decay and decay is not None:
-            feats_list.append(decay.unsqueeze(-1))
-        if self.use_pop and pop is not None:
-            feats_list.append(pop.unsqueeze(-1))
-        if self.use_p2p and p2p_score is not None:
-            feats_list.append(p2p_score.unsqueeze(-1))
-        if self.use_not_bounce and not_bounce is not None:
-            feats_list.append(not_bounce.unsqueeze(-1))
-
-        feats = torch.cat(feats_list, dim=-1)
-
+        feats = torch.cat([e, t], dim=-1)
         item_h = self.item_proj(feats)
         item_h, _ = self.item_gru(item_h)
 
@@ -1496,62 +993,23 @@ class GRURecDual(nn.Module):
         self,
         session_tokens,
         session_tier,
-        session_pop,
-        session_p2p,
-        session_not_bounce,
         session_cat,
-        session_dwell,
-        session_elapsed,
-        session_hour,
-        session_dow,
-        session_month,
-        session_gap,
-        session_age,
-        session_recency,
-        session_velocity,
-        session_decay,
         k=6,
         device='cpu',
         banned=None,
     ):
-        """Predict top-k next items with temporal + product features."""
+        """Predict top-k next items with compact product and category features."""
         if not session_tokens:
             return []
 
         x = torch.tensor(session_tokens, dtype=torch.long, device=device).unsqueeze(0)
         tier_t = torch.tensor(session_tier, dtype=torch.long, device=device).unsqueeze(0)
-        pop_t = torch.tensor(session_pop, dtype=torch.float, device=device).unsqueeze(0)
-        p2p_t = torch.tensor(session_p2p, dtype=torch.float, device=device).unsqueeze(0)
-        nb_t = torch.tensor(session_not_bounce, dtype=torch.float, device=device).unsqueeze(0)
         cat_t = torch.tensor(session_cat, dtype=torch.long, device=device).unsqueeze(0)
-        dwell_t = torch.tensor(session_dwell, dtype=torch.float, device=device).unsqueeze(0)
-        elapsed_t = torch.tensor(session_elapsed, dtype=torch.float, device=device).unsqueeze(0)
-        hour_t = torch.tensor(session_hour, dtype=torch.float, device=device).unsqueeze(0)
-        dow_t = torch.tensor(session_dow, dtype=torch.long, device=device).unsqueeze(0)
-        month_t = torch.tensor(session_month, dtype=torch.float, device=device).unsqueeze(0)
-        gap_t = torch.tensor(session_gap, dtype=torch.float, device=device).unsqueeze(0)
-        age_t = torch.tensor(session_age, dtype=torch.float, device=device).unsqueeze(0)
-        recency_t = torch.tensor(session_recency, dtype=torch.float, device=device).unsqueeze(0)
-        velocity_t = torch.tensor(session_velocity, dtype=torch.float, device=device).unsqueeze(0)
-        decay_t = torch.tensor(session_decay, dtype=torch.float, device=device).unsqueeze(0)
 
         logits = self.forward(
             x,
             tier_t,
-            pop_t,
-            p2p_t,
-            nb_t,
             cat_t,
-            dwell_t,
-            elapsed_t,
-            hour_t,
-            dow_t,
-            month_t,
-            gap_t,
-            age_t,
-            recency_t,
-            velocity_t,
-            decay_t,
         )[0, -1]  # (V,)
 
         if banned:
@@ -1583,26 +1041,12 @@ gru_model = GRURecDual(
     cat_hidden_dim=96,
     num_layers=1,
     dropout=0.2,
-    use_dwell=USE_DWELL_TIME,
-    use_elapsed=USE_SESSION_ELAPSED,
-    use_tod=USE_TIME_OF_DAY,
-    use_dow=USE_DAY_OF_WEEK,
-    use_decay=USE_TIME_DECAY,
-    use_month=USE_MONTH,
-    use_gap=USE_INTER_SESSION_GAP,
-    use_age=USE_PRODUCT_AGE,
-    use_recency=USE_PRODUCT_RECENCY,
-    use_velocity=USE_PRODUCT_VELOCITY,
-    use_pop=True,
-    use_p2p=True,
-    use_not_bounce=True,
 )
 
 device = "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu")
 gru_model.to(device)
 print(f"   Device: {device}")
 print(f"   Parameters: {sum(p.numel() for p in gru_model.parameters()):,}")
-print(f"   Dwell Time: {'Enabled' if USE_DWELL_TIME else 'Disabled'}")
 print(f"   Sample Weighting: {'Enabled' if USE_SAMPLE_WEIGHTING else 'Disabled'}")
 print(f"   GRU item input dim: {gru_model.item_proj[0].in_features}")
 
@@ -1643,24 +1087,10 @@ for epoch in range(EPOCHS):
     gru_model.train()
     total_loss, n_batches = 0.0, 0
 
-    for (x, dwell_b, elapsed_b, hour_b, dow_b, month_b, gap_b, age_b, recency_b, velocity_b,
-         decay_b, tier_b, pop_b, p2p_b, not_bounce_b, cat_b, y, w) in train_loader:
+    for x, tier_b, cat_b, y, w in train_loader:
         x = x.to(device)
         tier_b = tier_b.to(device)
-        pop_b = pop_b.to(device)
-        p2p_b = p2p_b.to(device)
-        not_bounce_b = not_bounce_b.to(device)
         cat_b = cat_b.to(device)
-        dwell_b = dwell_b.to(device)
-        elapsed_b = elapsed_b.to(device)
-        hour_b = hour_b.to(device)
-        dow_b = dow_b.to(device)
-        month_b = month_b.to(device)
-        gap_b = gap_b.to(device)
-        age_b = age_b.to(device)
-        recency_b = recency_b.to(device)
-        velocity_b = velocity_b.to(device)
-        decay_b = decay_b.to(device)
         y = y.to(device)
         w = w.to(device)
 
@@ -1668,20 +1098,7 @@ for epoch in range(EPOCHS):
         logits = gru_model(
             x,
             tier_b,
-            pop_b,
-            p2p_b,
-            not_bounce_b,
             cat_b,
-            dwell_b,
-            elapsed_b,
-            hour_b,
-            dow_b,
-            month_b,
-            gap_b,
-            age_b,
-            recency_b,
-            velocity_b,
-            decay_b,
         )
         loss = weighted_ce_loss(logits, y, w)
         loss.backward()
