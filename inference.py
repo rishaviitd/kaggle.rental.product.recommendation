@@ -29,6 +29,7 @@ config = load_json("config.json")
 
 PAD_IDX = config["pad_idx"]
 SESSION_TOLERANCE = pd.Timedelta(config["session_tolerance"])
+USE_PRICE_TIER = config.get("use_price_tier", True)
 
 
 def build_sessions_merge_asof(hits_path, visits_path, slug_map, tolerance=SESSION_TOLERANCE):
@@ -231,15 +232,18 @@ class GRURecDual(nn.Module):
         cat_hidden_dim=96,
         num_layers=1,
         dropout=0.2,
+        use_tier=True,
     ):
         super().__init__()
+        self.use_tier = use_tier
 
         self.item_emb = nn.Embedding(num_items + 1, item_emb_dim, padding_idx=PAD_IDX)
         nn.init.xavier_uniform_(self.item_emb.weight.data)
-        self.tier_emb = nn.Embedding(6, tier_emb_dim, padding_idx=PAD_IDX)
+        if self.use_tier:
+            self.tier_emb = nn.Embedding(6, tier_emb_dim, padding_idx=PAD_IDX)
         self.cat_emb = nn.Embedding(num_categories + 1, cat_emb_dim, padding_idx=PAD_IDX)
 
-        in_dim = item_emb_dim + tier_emb_dim
+        in_dim = item_emb_dim + (tier_emb_dim if self.use_tier else 0)
 
         self.item_proj = nn.Sequential(nn.Linear(in_dim, hidden_dim), nn.ReLU(), nn.Dropout(dropout))
         self.item_gru = nn.GRU(
@@ -266,9 +270,12 @@ class GRURecDual(nn.Module):
         cat=None,
     ):
         e = self.item_emb(x)
-        t = self.tier_emb(tier) if tier is not None else torch.zeros_like(e[..., :0])
+        feats_list = [e]
+        if self.use_tier:
+            t = self.tier_emb(tier) if tier is not None else torch.zeros_like(e[..., :0])
+            feats_list.append(t)
 
-        item_h = self.item_proj(torch.cat([e, t], dim=-1))
+        item_h = self.item_proj(torch.cat(feats_list, dim=-1))
         item_h, _ = self.item_gru(item_h)
 
         if cat is None:
@@ -336,6 +343,7 @@ def load_model(num_items, num_categories, device):
     model = GRURecDual(
         num_items=num_items,
         num_categories=num_categories,
+        use_tier=USE_PRICE_TIER,
     )
     model.load_state_dict(torch.load(ARTIFACTS_DIR / "model.pt", map_location=device))
     model.to(device)
