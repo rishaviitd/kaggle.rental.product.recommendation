@@ -14,7 +14,6 @@ from tqdm.auto import tqdm
 ARTIFACTS_DIR = Path("artifacts")
 DATA_DIR = Path("data")
 DEFAULT_OUTPUT = Path("output/predictions.csv")
-REFERENCE_OUTPUT = Path("output/submission.csv")
 
 
 def load_pickle(name):
@@ -873,25 +872,12 @@ def generate_submission(output_path):
     print(f"Global fallback: {stats['global']:,} ({stats['global'] / total * 100:.1f}%)")
     return output_path
 
-
-def compare_outputs(candidate_path, reference_path):
-    if not reference_path.exists():
-        print(f"Reference file not found, skipping byte compare: {reference_path}")
-        return
-    matches = candidate_path.read_bytes() == reference_path.read_bytes()
-    print(f"Byte-for-byte match with {reference_path}: {matches}")
-
-
 def main():
     parser = argparse.ArgumentParser(description="Generate submission from saved inference artifacts.")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
-    parser.add_argument("--reference", type=Path, default=REFERENCE_OUTPUT)
-    parser.add_argument("--no-compare", action="store_true")
     args = parser.parse_args()
 
-    output_path = generate_submission(args.output)
-    if not args.no_compare:
-        compare_outputs(output_path, args.reference)
+    generate_submission(args.output)
 
 
 if __name__ == "__main__":
