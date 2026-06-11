@@ -1,6 +1,0 @@
-{
-  "created_at": "2026-06-11T13:46:20Z",
-  "artifact_version": 1,
-  "model_class": "GRURecDual",
-  "inference_script": "inference.py"
-}

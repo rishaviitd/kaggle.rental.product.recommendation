@@ -1,7 +1,6 @@
 # Baseline with merge_asof time-based session matching + Temporal GRU
 import ast
 import csv
-from datetime import datetime
 import json
 import os
 import pickle
@@ -72,8 +71,6 @@ def save_inference_artifacts():
     pickle_artifacts = {
         "old_to_new.pkl": old_to_new,
         "slug_map.pkl": slug_map,
-        "pid_to_cat.pkl": pid_to_cat,
-        "cat2idx.pkl": cat2idx,
         "pid_to_cat_idx.pkl": pid_to_cat_idx,
         "pid_to_tier.pkl": pid_to_tier,
         "pid2idx.pkl": pid2idx,
@@ -103,18 +100,11 @@ def save_inference_artifacts():
         "num_items": num_items,
         "num_categories": num_categories,
     }
-    metadata = {
-        "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
-        "artifact_version": 1,
-        "model_class": "GRURecDual",
-        "inference_script": "inference.py",
-    }
 
     save_json_artifact("global_top.json", global_top)
     save_json_artifact("config.json", config)
-    save_json_artifact("metadata.json", metadata)
 
-    saved_count = len(pickle_artifacts) + 3
+    saved_count = len(pickle_artifacts) + 2
     print(f"   ✅ Saved {saved_count} inference artifacts to: {ARTIFACTS_DIR}")
 
 # ==============================================================================
