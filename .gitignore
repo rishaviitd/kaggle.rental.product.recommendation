@@ -34,9 +34,7 @@ dist/
 .idea/
 
 # Local outputs and transient artifacts
-output/
 submission/eval/
-data/transient/
 
 # Logs
 *.log
