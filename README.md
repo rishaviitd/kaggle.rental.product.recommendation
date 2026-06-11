@@ -78,36 +78,17 @@ The session length decides which tier handles the visit, and unfilled slots alwa
 
 ---
 
-## 1. Data Preprocessing & Mapping
+## Dual Path GRU Architecture
 
-Before any machine learning happens, the data from the old site and the new site must be unified.
-
-* **Product Unification**
-  * Consolidates product IDs and URL slugs from legacy datasets and the modern platform into a single ground-truth mapping.
-  * Ensures that historical interactions on discontinued URLs accurately map to current active product IDs.
-
-* **Category Learning**
-  * Dynamically learns missing category mappings by observing what products users click immediately after visiting a category page.
-  * Fixes sparse category data by letting actual user navigation behavior define what category a product belongs to.
-
-## 2. Feature Engineering
-
-The GRU focuses on compact sequence features that proved most useful in ablations.
+The primary prediction engine is a custom PyTorch sequence model built from compact inputs that proved most useful in ablations.
 
 * **GRU Inputs**
   * Product token sequence from merged browsing sessions.
   * Price tier embedding for each clicked product.
   * Category sequence for the parallel category GRU path.
 
-* **Training-Time Recency**
-  * Applies exponential sample weighting so more recent sessions contribute more to the loss.
-
-* **Fallback Signals**
-  * Precomputes the statistical lookup tables (co-occurrence, transitions, trigrams, category-to-product, inverted search index, global popularity) that power the fallback tiers described in the Overall Architecture above.
-
-## 3. Core Model: Dual-Path GRU
-
-The primary prediction engine is a custom PyTorch sequence model.
+* **Training-Time Recency Weighting**
+  * Applies exponential sample weighting on session age so more recent browsing sessions contribute more to the training loss.
 
 ```mermaid
 flowchart TD
