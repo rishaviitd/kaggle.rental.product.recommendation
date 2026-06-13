@@ -16,11 +16,25 @@
 
 ## Project Highlights
 
-**Best Kaggle score:** `Recall@6 = 0.417`
+🏆 **Best Kaggle score:** `Recall@6 = 0.417`
 
-**Model training:** PyTorch GRU pipeline managed with DVC, artifact versioning through S3, and experiment tracking support with MLflow.
+<p>
+  <img src="https://img.shields.io/badge/PyTorch-GRU-EE4C2C?logo=pytorch&logoColor=white" alt="PyTorch GRU">
+  <img src="https://img.shields.io/badge/DVC-Pipeline-13ADC7?logo=dvc&logoColor=white" alt="DVC">
+  <img src="https://img.shields.io/badge/MLflow-Experiments-0194E2?logo=mlflow&logoColor=white" alt="MLflow">
+  <img src="https://img.shields.io/badge/Amazon%20S3-Artifacts-569A31?logo=amazons3&logoColor=white" alt="Amazon S3">
+  <img src="https://img.shields.io/badge/FastAPI-Serving-009688?logo=fastapi&logoColor=white" alt="FastAPI">
+  <img src="https://img.shields.io/badge/Docker-Container-2496ED?logo=docker&logoColor=white" alt="Docker">
+  <img src="https://img.shields.io/badge/Amazon%20EC2-Compute-FF9900?logo=amazonec2&logoColor=white" alt="Amazon EC2">
+  <img src="https://img.shields.io/badge/PostgreSQL-RDS-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL">
+</p>
 
-**Model serving:** Dockerized FastAPI on EC2, Amazon RDS as a PostgreSQL database for inference data, and S3 as the source for model artifacts.
+| Area | Stack | Purpose |
+|---|---|---|
+| Model training | PyTorch GRU, DVC, MLflow | Train the session recommender, track experiments, and reproduce pipeline runs. |
+| Artifact storage | Amazon S3, DVC remote | Version intermediate and final model artifacts outside Git. |
+| Model serving | FastAPI, Docker, EC2 | Serve realtime recommendations from a lightweight CPU deployment. |
+| Inference data | Amazon RDS PostgreSQL | Store user/session rows and browsing events used for feature generation. |
 
 **Recommendation logic:** GRU for richer sessions, co-occurrence/transition/trigram fallbacks for short sessions, and search/category/global popularity fallbacks for cold-start behavior.
 
