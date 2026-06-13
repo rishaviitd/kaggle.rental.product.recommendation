@@ -83,6 +83,121 @@ This repository contains a hybrid recommendation system built to predict the nex
 
 The solution heavily leverages sequence modeling alongside robust fallback strategies to handle everything from rich, long-term user histories down to complete cold-starts.
 
+## Model Serving And Realtime Inference
+
+The first production serving design keeps the system intentionally simple: one Dockerized FastAPI service runs on EC2, reads the minimum required inference data from RDS, downloads the final artifact bundle from S3 during deployment or service startup, and returns recommendations by `client_id`. After startup, the PyTorch model and lookup artifacts stay loaded in EC2 RAM so each request can reuse them without reading from S3 again.
+
+```mermaid
+flowchart LR
+    CLIENT["Client / App<br/>GET /recommend/{client_id}"] --> API
+
+    subgraph EC2["EC2"]
+        direction LR
+        API["Dockerized FastAPI<br/>model files in RAM"] --> FEATURES["Feature generation<br/>build inference features"]
+        FEATURES --> FEATURESET["Inference features<br/>product sequence<br/>last slug and category<br/>GRU token, tier, category sequences"]
+        FEATURESET --> MODEL["Inference engine<br/>GRU + fallback recommenders"]
+        MODEL --> RESPONSE["Response<br/>top 6 product ids"]
+    end
+
+    subgraph RDS["Amazon RDS"]
+        direction TB
+        USERS["users<br/>latest visit/session context"]
+        EVENTS["user_browsing_events<br/>page views and product/category slugs"]
+    end
+
+    USERS --> FEATURES
+    EVENTS --> FEATURES
+```
+
+### Serving Request
+
+The client should not send model features directly. It should send only the user/session identifier:
+
+```http
+GET /recommend/{client_id}
+```
+
+Example response:
+
+```json
+{
+  "client_id": "0911978007540833652",
+  "recommendations": ["123", "456", "789", "222", "333", "444"]
+}
+```
+
+### RDS Tables
+
+The RDS schema should store only the fields needed during inference, not the full training parquet schema.
+
+`users` stores the current user/session context:
+
+```text
+client_id
+latest_visit_id
+latest_visit_time
+project_id
+region_country
+region_city
+device_category
+operating_system
+browser
+updated_at
+```
+
+`user_browsing_events` stores the browsing history needed to build session features:
+
+```text
+event_id
+client_id
+visit_id
+date_time
+page_type
+slug
+url
+is_page_view
+project_id
+created_at
+```
+
+The important inference columns are:
+
+```text
+users: client_id, latest_visit_id, latest_visit_time
+events: client_id, visit_id, date_time, page_type, slug
+```
+
+### Runtime Flow
+
+On service startup:
+
+```text
+1. Ensure artifacts/final exists on EC2.
+2. If needed, download final artifacts from S3.
+3. Load pickle/json artifacts.
+4. Load model.pt into CPU memory.
+5. Start FastAPI.
+```
+
+Per request:
+
+```text
+1. Receive client_id.
+2. Query users for the latest visit/session context.
+3. Query user_browsing_events for that client/session window.
+4. Build inference features:
+   product_sequence
+   last_slug
+   last_category_slug
+   GRU token sequence
+   price tier sequence
+   category index sequence
+5. Run GRU/fallback inference.
+6. Return top 6 product ids.
+```
+
+The final artifact bundle is small, around 2.6 MB, so the model and lookup artifacts should stay loaded in memory on EC2. Each request should only query RDS and run feature generation/inference; it should not reload the model.
+
 ## Overall Architecture
 
 The system operates as a **Multi-Tiered Recommender**. The core of the system is a Dual-Path GRU (Gated Recurrent Unit) neural network that predicts the next item in a sequence based on recent product clicks, price tier, and category context.
