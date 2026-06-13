@@ -4,24 +4,80 @@
 * **Notebook:** [Rental Product Recommendation GRU](https://www.kaggle.com/code/atomstack001/rental-product-recommendation-gru)
 * **Competition:** [Rental Product Recommendation System](https://www.kaggle.com/competitions/rental-product-recommendation-system)
 
-## 🚀 Quick Start (Reproduce in 3 Steps)
+## Reproduce The Output
 
 This project uses [`uv`](https://docs.astral.sh/uv/) to guarantee 100% dependency reproducibility.
+The training pipeline is managed with DVC so generated artifacts can be reproduced from the same code, params, and data.
 
 ```bash
-# 1. Clone the repository
 git clone https://github.com/rishaviitd/kaggle.rental.product.recommendation.git
 cd kaggle.rental.product.recommendation
 
-# 2. Instantly recreate the exact locked environment
 uv sync
+```
 
-# 3. Train model and save inference artifacts
-uv run train.py
+### Data Requirement
 
-# 4. Generate output/predictions.csv from saved artifacts
+Raw competition data is not committed to this repository.
+Before running the pipeline, place the required parquet files under `data/`:
+
+```text
+data/metrika_hits.parquet
+data/metrika_visits.parquet
+data/metrika_hits_test.parquet
+data/metrika_visits_test.parquet
+data/products_all.parquet
+data/old_site_products.parquet
+data/new_site_products.parquet
+data/old_site_new_site_products.parquet
+data/new_site_orders.parquet
+data/old_site_orders.parquet
+```
+
+### Rebuild Artifacts Locally
+
+Use this when you have the raw `data/` files and want to regenerate all intermediate and final artifacts.
+
+```bash
+uv run dvc repro --force
 uv run inference.py
 ```
+
+This creates:
+
+```text
+artifacts/intermediate/
+artifacts/final/
+output/predictions.csv
+```
+
+### Restore Artifacts From A DVC Remote
+
+Use this when you have access to a DVC remote. The remote must be configured first.
+It can point to S3 or to a local artifact/cache directory, depending on your setup.
+
+Example S3 remote:
+
+```bash
+uv run dvc remote add -d artifacts-s3 s3://your-bucket/path/to/dvc-cache
+```
+
+Example local remote:
+
+```bash
+uv run dvc remote add -d artifacts-local /path/to/local/dvc-cache
+```
+
+Then restore artifacts and generate predictions:
+
+```bash
+uv run dvc pull
+uv run inference.py
+```
+
+The Git repository stores code, `params.yaml`, `dvc.yaml`, and `dvc.lock`.
+DVC stores generated artifacts listed as pipeline outputs.
+If you want to version your own raw data with DVC, configure your own remote and run `dvc add` for the files under `data/`.
 
 This repository contains a hybrid recommendation system built to predict the next rental product a user will interact with based on their browsing session history.
 
