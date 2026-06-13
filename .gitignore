@@ -38,3 +38,5 @@ submission/eval/
 
 # Logs
 *.log
+
+artifacts/intermediate/
