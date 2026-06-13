@@ -1,0 +1,13 @@
+{
+  "pad_idx": 0,
+  "data_dir": "/Users/rishavkumar/Desktop/portfolio/kaggle.rental.product.recommendation/data",
+  "model_path": "/Users/rishavkumar/Desktop/portfolio/kaggle.rental.product.recommendation/artifacts/final/model.pt",
+  "w_new": 2.0,
+  "session_tolerance": "0 days 02:00:00",
+  "cutoff_date": "2025-04-17 00:00:00",
+  "use_sample_weighting": true,
+  "use_price_tier": true,
+  "sample_weight_decay_rate": 0.0004,
+  "num_items": 590,
+  "num_categories": 63
+}

@@ -1,0 +1,26 @@
+{
+  "num_items": 590,
+  "num_categories": 63,
+  "max_date": "2025-10-14T23:53:35",
+  "train_sessions": 123259,
+  "test_sessions": 632,
+  "training_sessions": 40280,
+  "minimum_session_products": 2,
+  "sequence_length": {
+    "mean": 4.1380089374379345,
+    "median": 3.0,
+    "min": 2,
+    "max": 132
+  },
+  "session_age_days": {
+    "mean": 725.3169811320755,
+    "min": -83,
+    "max": 1420
+  },
+  "feature_coverage": {
+    "train_tier": 1.0,
+    "train_category": 1.0,
+    "test_tier": 1.0,
+    "test_category": 1.0
+  }
+}
