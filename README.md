@@ -1,8 +1,28 @@
-# Kaggle Rental Product Recommendation
+<p align="center">
+  <img src="https://www.kaggle.com/competitions/119746/images/header" alt="Rental Product Recommendation System" width="100%">
+</p>
 
-🏆 **Best Score on Kaggle (Recall@6: 0.417)**
-* **Notebook:** [Rental Product Recommendation GRU](https://www.kaggle.com/code/atomstack001/rental-product-recommendation-gru)
-* **Competition:** [Rental Product Recommendation System](https://www.kaggle.com/competitions/rental-product-recommendation-system)
+<h1 align="center">Kaggle Rental Product Recommendation</h1>
+
+<p align="center">
+  Session-based rental product recommender using a PyTorch GRU, statistical fallback recommenders, DVC artifact versioning, and an AWS-oriented serving design.
+</p>
+
+<p align="center">
+  <a href="https://www.kaggle.com/competitions/rental-product-recommendation-system">Competition</a>
+  ·
+  <a href="https://www.kaggle.com/code/atomstack001/rental-product-recommendation-gru">Notebook</a>
+</p>
+
+## Project Highlights
+
+**Best Kaggle score:** `Recall@6 = 0.417`
+
+**Model training:** PyTorch GRU pipeline managed with DVC, artifact versioning through S3, and experiment tracking support with MLflow.
+
+**Model serving:** Dockerized FastAPI on EC2, Amazon RDS as a PostgreSQL database for inference data, and S3 as the source for model artifacts.
+
+**Recommendation logic:** GRU for richer sessions, co-occurrence/transition/trigram fallbacks for short sessions, and search/category/global popularity fallbacks for cold-start behavior.
 
 ## Reproduce The Output
 
