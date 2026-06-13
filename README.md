@@ -14,11 +14,7 @@
   <a href="https://www.kaggle.com/code/atomstack001/rental-product-recommendation-gru">Notebook</a>
 </p>
 
-## Project Highlights
-
-🏆 **Best Kaggle score:** `Recall@6 = 0.417`
-
-<p>
+<p align="center">
   <img src="https://img.shields.io/badge/PyTorch-GRU-EE4C2C?logo=pytorch&logoColor=white" alt="PyTorch GRU">
   <img src="https://img.shields.io/badge/DVC-Pipeline-13ADC7?logo=dvc&logoColor=white" alt="DVC">
   <img src="https://img.shields.io/badge/MLflow-Experiments-0194E2?logo=mlflow&logoColor=white" alt="MLflow">
@@ -28,6 +24,10 @@
   <img src="https://img.shields.io/badge/Amazon%20EC2-Compute-FF9900?logo=amazonec2&logoColor=white" alt="Amazon EC2">
   <img src="https://img.shields.io/badge/PostgreSQL-RDS-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL">
 </p>
+
+## Project Highlights
+
+🏆 **Best Kaggle score:** `Recall@6 = 0.417`
 
 | Area | Stack | Purpose |
 |---|---|---|
