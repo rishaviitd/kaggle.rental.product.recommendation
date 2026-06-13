@@ -1,0 +1,4 @@
+[core]
+    remote = artifacts-s3
+['remote "artifacts-s3"']
+    url = s3://kaggle-rental-product-recommendation-artifacts/dvc

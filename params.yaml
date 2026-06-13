@@ -1,0 +1,60 @@
+seed: 100
+
+paths:
+  data_dir: data
+  artifacts_dir: artifacts
+  intermediate_dir: artifacts/intermediate
+  final_dir: artifacts/final
+
+products:
+  price_tiers:
+    Tier_1: 1
+    Tier_2: 2
+    Tier_3: 3
+    Tier_4: 4
+    Tier_5: 5
+
+discovery:
+  reference_date: "2025-10-14"
+  lookback_days: 180
+  new_site_weight: 2.0
+  category_min_votes: 5
+  search_min_token_length: 3
+  global_top_k: 50
+
+sessions:
+  tolerance: 2h
+  minimum_product_sequence_length: 2
+
+behavioral_signals:
+  cooccurrence_window_size: 10
+  recent_train_weight: 1.0
+  test_weight: 1.0
+
+gru_data:
+  minimum_session_products: 2
+
+model:
+  item_embedding_dim: 128
+  tier_embedding_dim: 4
+  category_embedding_dim: 8
+  hidden_dim: 128
+  category_hidden_dim: 96
+  num_layers: 1
+  dropout: 0.2
+  use_price_tier: true
+
+training:
+  device: mps
+  epochs: 3
+  batch_size: 64
+  learning_rate: 0.001
+  weight_decay: 0.00001
+  gradient_clip_norm: 1.0
+  use_sample_weighting: true
+  sample_weight_decay_rate: 0.0004
+  scheduler_factor: 0.5
+  scheduler_patience: 3
+
+packaging:
+  validate_required_artifacts: true

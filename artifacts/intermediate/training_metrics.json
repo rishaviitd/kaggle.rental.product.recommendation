@@ -1,0 +1,13 @@
+{
+  "best_loss": 3.9352548281351725,
+  "epoch_losses": [
+    4.496216229030064,
+    4.051779427982512,
+    3.9352548281351725
+  ],
+  "epochs": 3,
+  "device": "mps",
+  "training_samples": 40280,
+  "batches_per_epoch": 630,
+  "parameters": 381991
+}

@@ -1,0 +1,156 @@
+stages:
+  prepare_products:
+    cmd: uv run python -m training.prepare_products
+    deps:
+      - training/config.py
+      - training/utils.py
+      - training/prepare_products.py
+      - data/old_site_new_site_products.parquet
+      - data/products_all.parquet
+      - data/old_site_products.parquet
+      - data/new_site_products.parquet
+    params:
+      - paths
+      - products
+    outs:
+      - artifacts/intermediate/old_to_new.pkl
+      - artifacts/intermediate/slug_map.pkl
+      - artifacts/intermediate/pid_to_cat.pkl
+      - artifacts/intermediate/cat2idx.pkl
+      - artifacts/intermediate/pid_to_cat_idx.pkl
+      - artifacts/intermediate/pid_to_tier.pkl
+      - artifacts/intermediate/new_products.parquet
+
+  prepare_discovery:
+    cmd: uv run python -m training.prepare_discovery
+    deps:
+      - training/config.py
+      - training/utils.py
+      - training/prepare_discovery.py
+      - data/metrika_hits.parquet
+      - data/metrika_hits_test.parquet
+      - artifacts/intermediate/slug_map.pkl
+      - artifacts/intermediate/pid_to_cat.pkl
+      - artifacts/intermediate/new_products.parquet
+    params:
+      - paths
+      - discovery
+    outs:
+      - artifacts/intermediate/slug_to_cat_map.pkl
+      - artifacts/intermediate/search_index.pkl
+      - artifacts/intermediate/global_top.json
+
+  prepare_sessions:
+    cmd: uv run python -m training.prepare_sessions
+    deps:
+      - training/config.py
+      - training/utils.py
+      - training/prepare_sessions.py
+      - data/metrika_hits.parquet
+      - data/metrika_visits.parquet
+      - data/metrika_hits_test.parquet
+      - data/metrika_visits_test.parquet
+      - artifacts/intermediate/slug_map.pkl
+    params:
+      - paths
+      - sessions
+    outs:
+      - artifacts/intermediate/train_merged.parquet
+      - artifacts/intermediate/test_merged.parquet
+      - artifacts/intermediate/train_sessions.parquet
+      - artifacts/intermediate/test_sessions.parquet
+
+  prepare_behavioral_signals:
+    cmd: uv run python -m training.prepare_behavioral_signals
+    deps:
+      - training/config.py
+      - training/utils.py
+      - training/prepare_behavioral_signals.py
+      - data/new_site_orders.parquet
+      - data/old_site_orders.parquet
+      - artifacts/intermediate/old_to_new.pkl
+      - artifacts/intermediate/slug_map.pkl
+      - artifacts/intermediate/new_products.parquet
+      - artifacts/intermediate/train_merged.parquet
+      - artifacts/intermediate/test_merged.parquet
+      - artifacts/intermediate/train_sessions.parquet
+      - artifacts/intermediate/test_sessions.parquet
+    params:
+      - paths
+      - discovery
+      - behavioral_signals
+    outs:
+      - artifacts/intermediate/coocc.pkl
+      - artifacts/intermediate/p2p.pkl
+      - artifacts/intermediate/trigrams_dict.pkl
+      - artifacts/intermediate/cat2p.pkl
+      - artifacts/intermediate/order_cooccur.pkl
+
+  prepare_gru_data:
+    cmd: uv run python -m training.prepare_gru_data
+    deps:
+      - training/config.py
+      - training/utils.py
+      - training/prepare_gru_data.py
+      - artifacts/intermediate/slug_map.pkl
+      - artifacts/intermediate/pid_to_tier.pkl
+      - artifacts/intermediate/cat2idx.pkl
+      - artifacts/intermediate/pid_to_cat_idx.pkl
+      - artifacts/intermediate/train_merged.parquet
+      - artifacts/intermediate/test_merged.parquet
+    params:
+      - paths
+      - gru_data
+    outs:
+      - artifacts/intermediate/gru_sequences.pkl
+      - artifacts/intermediate/pid2idx.pkl
+      - artifacts/intermediate/idx2pid.pkl
+      - artifacts/intermediate/gru_metadata.json
+
+  train_gru:
+    cmd: uv run python -m training.train_gru
+    deps:
+      - training/config.py
+      - training/utils.py
+      - training/model.py
+      - training/train_gru.py
+      - artifacts/intermediate/gru_sequences.pkl
+      - artifacts/intermediate/gru_metadata.json
+    params:
+      - paths
+      - seed
+      - model
+      - training
+    outs:
+      - artifacts/intermediate/model.pt
+    metrics:
+      - artifacts/intermediate/training_metrics.json:
+          cache: false
+
+  package_artifacts:
+    cmd: uv run python -m training.package_artifacts
+    deps:
+      - training/config.py
+      - training/utils.py
+      - training/package_artifacts.py
+      - artifacts/intermediate/model.pt
+      - artifacts/intermediate/old_to_new.pkl
+      - artifacts/intermediate/slug_map.pkl
+      - artifacts/intermediate/pid_to_cat_idx.pkl
+      - artifacts/intermediate/pid_to_tier.pkl
+      - artifacts/intermediate/pid2idx.pkl
+      - artifacts/intermediate/idx2pid.pkl
+      - artifacts/intermediate/p2p.pkl
+      - artifacts/intermediate/coocc.pkl
+      - artifacts/intermediate/trigrams_dict.pkl
+      - artifacts/intermediate/cat2p.pkl
+      - artifacts/intermediate/order_cooccur.pkl
+      - artifacts/intermediate/search_index.pkl
+      - artifacts/intermediate/slug_to_cat_map.pkl
+      - artifacts/intermediate/global_top.json
+      - artifacts/intermediate/gru_metadata.json
+    params:
+      - paths
+      - packaging
+    outs:
+      - artifacts/final

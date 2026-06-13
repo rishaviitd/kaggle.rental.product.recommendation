@@ -10,7 +10,7 @@ import torch.nn as nn
 from tqdm.auto import tqdm
 
 
-ARTIFACTS_DIR = Path("artifacts")
+ARTIFACTS_DIR = Path("artifacts/final")
 DATA_DIR = Path("data")
 DEFAULT_OUTPUT = Path("output/predictions.csv")
 

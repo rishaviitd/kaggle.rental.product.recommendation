@@ -1,0 +1,513 @@
+schema: '2.0'
+stages:
+  prepare_products:
+    cmd: uv run python -m training.prepare_products
+    deps:
+    - path: data/new_site_products.parquet
+      hash: md5
+      md5: 8d97eb36db7f49dc013cbf90014f9c2e
+      size: 717423
+    - path: data/old_site_new_site_products.parquet
+      hash: md5
+      md5: d0107f53344164e87e5a75e7dce44b2b
+      size: 6619
+    - path: data/old_site_products.parquet
+      hash: md5
+      md5: 54077c1798421d122e9330ef3436b7a3
+      size: 666294
+    - path: data/products_all.parquet
+      hash: md5
+      md5: 1f3f860cfffa5f1d6ceb064cbfcfaa7f
+      size: 548115
+    - path: training/config.py
+      hash: md5
+      md5: 02315a9d3e2b3dff881082f154a311d0
+      size: 9634
+    - path: training/prepare_products.py
+      hash: md5
+      md5: c661556556bc7f78bb3685c1a2a40c77
+      size: 5522
+    - path: training/utils.py
+      hash: md5
+      md5: 7027d34ea3e6d3da78cd0db1936da915
+      size: 4254
+    params:
+      params.yaml:
+        paths:
+          data_dir: data
+          artifacts_dir: artifacts
+          intermediate_dir: artifacts/intermediate
+          final_dir: artifacts/final
+        products:
+          price_tiers:
+            Tier_1: 1
+            Tier_2: 2
+            Tier_3: 3
+            Tier_4: 4
+            Tier_5: 5
+    outs:
+    - path: artifacts/intermediate/cat2idx.pkl
+      hash: md5
+      md5: ead56356ff0356e996a7a833ea84bb01
+      size: 2182
+    - path: artifacts/intermediate/new_products.parquet
+      hash: md5
+      md5: 8d97eb36db7f49dc013cbf90014f9c2e
+      size: 717423
+    - path: artifacts/intermediate/old_to_new.pkl
+      hash: md5
+      md5: e46f315c74776b9bb097e0de858043af
+      size: 3376
+    - path: artifacts/intermediate/pid_to_cat.pkl
+      hash: md5
+      md5: 122e20289f8648700432e9c4c3e40bca
+      size: 23916
+    - path: artifacts/intermediate/pid_to_cat_idx.pkl
+      hash: md5
+      md5: 9163bd2afd844a223b7a028c80303116
+      size: 4692
+    - path: artifacts/intermediate/pid_to_tier.pkl
+      hash: md5
+      md5: 171c0c4dd6c70bfd72abacfb89a6b8ec
+      size: 4692
+    - path: artifacts/intermediate/slug_map.pkl
+      hash: md5
+      md5: 5c815cb13940f59d5962be4fddc6978d
+      size: 48920
+  prepare_discovery:
+    cmd: uv run python -m training.prepare_discovery
+    deps:
+    - path: artifacts/intermediate/new_products.parquet
+      hash: md5
+      md5: 8d97eb36db7f49dc013cbf90014f9c2e
+      size: 717423
+    - path: artifacts/intermediate/pid_to_cat.pkl
+      hash: md5
+      md5: 122e20289f8648700432e9c4c3e40bca
+      size: 23916
+    - path: artifacts/intermediate/slug_map.pkl
+      hash: md5
+      md5: 5c815cb13940f59d5962be4fddc6978d
+      size: 48920
+    - path: data/metrika_hits.parquet
+      hash: md5
+      md5: cd190f59265fe90b0aed1752bfa21b58
+      size: 73771406
+    - path: data/metrika_hits_test.parquet
+      hash: md5
+      md5: a73c1db3e8c345b0bbf4975e2bb73a03
+      size: 331651
+    - path: training/config.py
+      hash: md5
+      md5: 02315a9d3e2b3dff881082f154a311d0
+      size: 9634
+    - path: training/prepare_discovery.py
+      hash: md5
+      md5: 75dd2a19d70c2cf22046eb83f125eba9
+      size: 6776
+    - path: training/utils.py
+      hash: md5
+      md5: 7027d34ea3e6d3da78cd0db1936da915
+      size: 4254
+    params:
+      params.yaml:
+        discovery:
+          reference_date: '2025-10-14'
+          lookback_days: 180
+          new_site_weight: 2.0
+          category_min_votes: 5
+          search_min_token_length: 3
+          global_top_k: 50
+        paths:
+          data_dir: data
+          artifacts_dir: artifacts
+          intermediate_dir: artifacts/intermediate
+          final_dir: artifacts/final
+    outs:
+    - path: artifacts/intermediate/global_top.json
+      hash: md5
+      md5: 84b9ca7f05a8d889a9dfe99ba934350a
+      size: 754
+    - path: artifacts/intermediate/search_index.pkl
+      hash: md5
+      md5: 7a2bc5c121bb464cfecfc3c5c30ed806
+      size: 65035
+    - path: artifacts/intermediate/slug_to_cat_map.pkl
+      hash: md5
+      md5: e6a8c424cf39935bd9e0f7e8c57caff6
+      size: 4738
+  prepare_sessions:
+    cmd: uv run python -m training.prepare_sessions
+    deps:
+    - path: artifacts/intermediate/slug_map.pkl
+      hash: md5
+      md5: 5c815cb13940f59d5962be4fddc6978d
+      size: 48920
+    - path: data/metrika_hits.parquet
+      hash: md5
+      md5: cd190f59265fe90b0aed1752bfa21b58
+      size: 73771406
+    - path: data/metrika_hits_test.parquet
+      hash: md5
+      md5: a73c1db3e8c345b0bbf4975e2bb73a03
+      size: 331651
+    - path: data/metrika_visits.parquet
+      hash: md5
+      md5: d0eb0d75b85f2eaeb28d46ec6927402d
+      size: 65681867
+    - path: data/metrika_visits_test.parquet
+      hash: md5
+      md5: cd4b2655ac3a8ffbbb8da1a04d4515e4
+      size: 312412
+    - path: training/config.py
+      hash: md5
+      md5: 02315a9d3e2b3dff881082f154a311d0
+      size: 9634
+    - path: training/prepare_sessions.py
+      hash: md5
+      md5: be9ef31cce2a4cf9678e4deb2acba02e
+      size: 5558
+    - path: training/utils.py
+      hash: md5
+      md5: 7027d34ea3e6d3da78cd0db1936da915
+      size: 4254
+    params:
+      params.yaml:
+        paths:
+          data_dir: data
+          artifacts_dir: artifacts
+          intermediate_dir: artifacts/intermediate
+          final_dir: artifacts/final
+        sessions:
+          tolerance: 2h
+          minimum_product_sequence_length: 2
+    outs:
+    - path: artifacts/intermediate/test_merged.parquet
+      hash: md5
+      md5: c91109618b62c0bf437de0b828936e22
+      size: 381783
+    - path: artifacts/intermediate/test_sessions.parquet
+      hash: md5
+      md5: 4dd1759f4a579ddba74983f7a8c71e4d
+      size: 18846
+    - path: artifacts/intermediate/train_merged.parquet
+      hash: md5
+      md5: 31032a64743eea526bfa826df3333918
+      size: 88148954
+    - path: artifacts/intermediate/train_sessions.parquet
+      hash: md5
+      md5: ed8994c6e4e727d63744cc89dd54fc4b
+      size: 2589955
+  prepare_behavioral_signals:
+    cmd: uv run python -m training.prepare_behavioral_signals
+    deps:
+    - path: artifacts/intermediate/new_products.parquet
+      hash: md5
+      md5: 8d97eb36db7f49dc013cbf90014f9c2e
+      size: 717423
+    - path: artifacts/intermediate/old_to_new.pkl
+      hash: md5
+      md5: e46f315c74776b9bb097e0de858043af
+      size: 3376
+    - path: artifacts/intermediate/slug_map.pkl
+      hash: md5
+      md5: 5c815cb13940f59d5962be4fddc6978d
+      size: 48920
+    - path: artifacts/intermediate/test_merged.parquet
+      hash: md5
+      md5: c91109618b62c0bf437de0b828936e22
+      size: 381783
+    - path: artifacts/intermediate/test_sessions.parquet
+      hash: md5
+      md5: 4dd1759f4a579ddba74983f7a8c71e4d
+      size: 18846
+    - path: artifacts/intermediate/train_merged.parquet
+      hash: md5
+      md5: 31032a64743eea526bfa826df3333918
+      size: 88148954
+    - path: artifacts/intermediate/train_sessions.parquet
+      hash: md5
+      md5: ed8994c6e4e727d63744cc89dd54fc4b
+      size: 2589955
+    - path: data/new_site_orders.parquet
+      hash: md5
+      md5: 997cc37c9f63d418b51533eb31ce138f
+      size: 132020
+    - path: data/old_site_orders.parquet
+      hash: md5
+      md5: 73976c214fb1808a80ec3b9ea13486cf
+      size: 425725
+    - path: training/config.py
+      hash: md5
+      md5: 02315a9d3e2b3dff881082f154a311d0
+      size: 9634
+    - path: training/prepare_behavioral_signals.py
+      hash: md5
+      md5: ba122c841c3b96a5beeb0e23fa7ef2c4
+      size: 8425
+    - path: training/utils.py
+      hash: md5
+      md5: 7027d34ea3e6d3da78cd0db1936da915
+      size: 4254
+    params:
+      params.yaml:
+        behavioral_signals:
+          cooccurrence_window_size: 10
+          recent_train_weight: 1.0
+          test_weight: 1.0
+        discovery:
+          reference_date: '2025-10-14'
+          lookback_days: 180
+          new_site_weight: 2.0
+          category_min_votes: 5
+          search_min_token_length: 3
+          global_top_k: 50
+        paths:
+          data_dir: data
+          artifacts_dir: artifacts
+          intermediate_dir: artifacts/intermediate
+          final_dir: artifacts/final
+    outs:
+    - path: artifacts/intermediate/cat2p.pkl
+      hash: md5
+      md5: 0d645caad0f7d0ba08abf4f4a4687adc
+      size: 31596
+    - path: artifacts/intermediate/coocc.pkl
+      hash: md5
+      md5: 6b9f1caad0b841473404bea723383ee6
+      size: 383777
+    - path: artifacts/intermediate/order_cooccur.pkl
+      hash: md5
+      md5: 4a5b920b6bea4936cddae97f5496dc60
+      size: 88290
+    - path: artifacts/intermediate/p2p.pkl
+      hash: md5
+      md5: 761806d39aedc63f278bb91df29ee0f7
+      size: 112372
+    - path: artifacts/intermediate/trigrams_dict.pkl
+      hash: md5
+      md5: 1629525f04316b767b0d06f939c930d3
+      size: 382227
+  prepare_gru_data:
+    cmd: uv run python -m training.prepare_gru_data
+    deps:
+    - path: artifacts/intermediate/cat2idx.pkl
+      hash: md5
+      md5: ead56356ff0356e996a7a833ea84bb01
+      size: 2182
+    - path: artifacts/intermediate/pid_to_cat_idx.pkl
+      hash: md5
+      md5: 9163bd2afd844a223b7a028c80303116
+      size: 4692
+    - path: artifacts/intermediate/pid_to_tier.pkl
+      hash: md5
+      md5: 171c0c4dd6c70bfd72abacfb89a6b8ec
+      size: 4692
+    - path: artifacts/intermediate/slug_map.pkl
+      hash: md5
+      md5: 5c815cb13940f59d5962be4fddc6978d
+      size: 48920
+    - path: artifacts/intermediate/test_merged.parquet
+      hash: md5
+      md5: c91109618b62c0bf437de0b828936e22
+      size: 381783
+    - path: artifacts/intermediate/train_merged.parquet
+      hash: md5
+      md5: 31032a64743eea526bfa826df3333918
+      size: 88148954
+    - path: training/config.py
+      hash: md5
+      md5: 02315a9d3e2b3dff881082f154a311d0
+      size: 9634
+    - path: training/prepare_gru_data.py
+      hash: md5
+      md5: 8527d479176d2fd9b56980de1f0045a1
+      size: 8154
+    - path: training/utils.py
+      hash: md5
+      md5: 7027d34ea3e6d3da78cd0db1936da915
+      size: 4254
+    params:
+      params.yaml:
+        gru_data:
+          minimum_session_products: 2
+        paths:
+          data_dir: data
+          artifacts_dir: artifacts
+          intermediate_dir: artifacts/intermediate
+          final_dir: artifacts/final
+    outs:
+    - path: artifacts/intermediate/gru_metadata.json
+      hash: md5
+      md5: 9b44d4b7d007d8946483bad638413fdd
+      size: 525
+    - path: artifacts/intermediate/gru_sequences.pkl
+      hash: md5
+      md5: c585f872c3642a2cb214018ee0c50134
+      size: 1801350
+    - path: artifacts/intermediate/idx2pid.pkl
+      hash: md5
+      md5: 4ceafd792d5e6601e05519d072d5d5fd
+      size: 4481
+    - path: artifacts/intermediate/pid2idx.pkl
+      hash: md5
+      md5: 98ba87a7a2c19dce25e9d80e710de096
+      size: 4481
+  train_gru:
+    cmd: uv run python -m training.train_gru
+    deps:
+    - path: artifacts/intermediate/gru_metadata.json
+      hash: md5
+      md5: 9b44d4b7d007d8946483bad638413fdd
+      size: 525
+    - path: artifacts/intermediate/gru_sequences.pkl
+      hash: md5
+      md5: c585f872c3642a2cb214018ee0c50134
+      size: 1801350
+    - path: training/config.py
+      hash: md5
+      md5: 02315a9d3e2b3dff881082f154a311d0
+      size: 9634
+    - path: training/model.py
+      hash: md5
+      md5: 642288bffc49a70112e3b8d12307baea
+      size: 4464
+    - path: training/train_gru.py
+      hash: md5
+      md5: 1e8793a944d2765730e02925de4e910b
+      size: 9078
+    - path: training/utils.py
+      hash: md5
+      md5: 7027d34ea3e6d3da78cd0db1936da915
+      size: 4254
+    params:
+      params.yaml:
+        model:
+          item_embedding_dim: 128
+          tier_embedding_dim: 4
+          category_embedding_dim: 8
+          hidden_dim: 128
+          category_hidden_dim: 96
+          num_layers: 1
+          dropout: 0.2
+          use_price_tier: true
+        paths:
+          data_dir: data
+          artifacts_dir: artifacts
+          intermediate_dir: artifacts/intermediate
+          final_dir: artifacts/final
+        seed: 100
+        training:
+          device: mps
+          epochs: 3
+          batch_size: 64
+          learning_rate: 0.001
+          weight_decay: 1e-05
+          gradient_clip_norm: 1.0
+          use_sample_weighting: true
+          sample_weight_decay_rate: 0.0004
+          scheduler_factor: 0.5
+          scheduler_patience: 3
+    outs:
+    - path: artifacts/intermediate/model.pt
+      hash: md5
+      md5: 90802d20c891b8f2d7f3b5c834aeb4fb
+      size: 1533122
+    - path: artifacts/intermediate/training_metrics.json
+      hash: md5
+      md5: 692e04da32925dcd571cebf0b2984864
+      size: 247
+  package_artifacts:
+    cmd: uv run python -m training.package_artifacts
+    deps:
+    - path: artifacts/intermediate/cat2p.pkl
+      hash: md5
+      md5: 0d645caad0f7d0ba08abf4f4a4687adc
+      size: 31596
+    - path: artifacts/intermediate/coocc.pkl
+      hash: md5
+      md5: 6b9f1caad0b841473404bea723383ee6
+      size: 383777
+    - path: artifacts/intermediate/global_top.json
+      hash: md5
+      md5: 84b9ca7f05a8d889a9dfe99ba934350a
+      size: 754
+    - path: artifacts/intermediate/gru_metadata.json
+      hash: md5
+      md5: 9b44d4b7d007d8946483bad638413fdd
+      size: 525
+    - path: artifacts/intermediate/idx2pid.pkl
+      hash: md5
+      md5: 4ceafd792d5e6601e05519d072d5d5fd
+      size: 4481
+    - path: artifacts/intermediate/model.pt
+      hash: md5
+      md5: 90802d20c891b8f2d7f3b5c834aeb4fb
+      size: 1533122
+    - path: artifacts/intermediate/old_to_new.pkl
+      hash: md5
+      md5: e46f315c74776b9bb097e0de858043af
+      size: 3376
+    - path: artifacts/intermediate/order_cooccur.pkl
+      hash: md5
+      md5: 4a5b920b6bea4936cddae97f5496dc60
+      size: 88290
+    - path: artifacts/intermediate/p2p.pkl
+      hash: md5
+      md5: 761806d39aedc63f278bb91df29ee0f7
+      size: 112372
+    - path: artifacts/intermediate/pid2idx.pkl
+      hash: md5
+      md5: 98ba87a7a2c19dce25e9d80e710de096
+      size: 4481
+    - path: artifacts/intermediate/pid_to_cat_idx.pkl
+      hash: md5
+      md5: 9163bd2afd844a223b7a028c80303116
+      size: 4692
+    - path: artifacts/intermediate/pid_to_tier.pkl
+      hash: md5
+      md5: 171c0c4dd6c70bfd72abacfb89a6b8ec
+      size: 4692
+    - path: artifacts/intermediate/search_index.pkl
+      hash: md5
+      md5: 7a2bc5c121bb464cfecfc3c5c30ed806
+      size: 65035
+    - path: artifacts/intermediate/slug_map.pkl
+      hash: md5
+      md5: 5c815cb13940f59d5962be4fddc6978d
+      size: 48920
+    - path: artifacts/intermediate/slug_to_cat_map.pkl
+      hash: md5
+      md5: e6a8c424cf39935bd9e0f7e8c57caff6
+      size: 4738
+    - path: artifacts/intermediate/trigrams_dict.pkl
+      hash: md5
+      md5: 1629525f04316b767b0d06f939c930d3
+      size: 382227
+    - path: training/config.py
+      hash: md5
+      md5: 02315a9d3e2b3dff881082f154a311d0
+      size: 9634
+    - path: training/package_artifacts.py
+      hash: md5
+      md5: b7a5a38ad55613725256946f9960ffe5
+      size: 2877
+    - path: training/utils.py
+      hash: md5
+      md5: 7027d34ea3e6d3da78cd0db1936da915
+      size: 4254
+    params:
+      params.yaml:
+        packaging:
+          validate_required_artifacts: true
+        paths:
+          data_dir: data
+          artifacts_dir: artifacts
+          intermediate_dir: artifacts/intermediate
+          final_dir: artifacts/final
+    outs:
+    - path: artifacts/final
+      hash: md5
+      md5: 86c8ef8ce08ae06a1749388817011e66.dir
+      size: 2673024
+      nfiles: 16
