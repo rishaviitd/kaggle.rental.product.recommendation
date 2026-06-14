@@ -162,44 +162,126 @@ Example response:
 
 ### RDS Tables
 
-The RDS schema should store only the fields needed during inference, not the full training parquet schema.
+The RDS schema should store only the fields needed during inference, not the full training parquet schema. For serving, the two test parquet datasets map to two lean RDS tables.
 
-`users` stores the current user/session context:
-
-```text
-client_id
-latest_visit_id
-latest_visit_time
-project_id
-region_country
-region_city
-device_category
-operating_system
-browser
-updated_at
-```
-
-`user_browsing_events` stores the browsing history needed to build session features:
+`metrika_visits_test.parquet` becomes the `users` table:
 
 ```text
-event_id
 client_id
 visit_id
 date_time
-page_type
-slug
-url
-is_page_view
-project_id
-created_at
 ```
 
-The important inference columns are:
+`metrika_hits_test.parquet` becomes the `user_browsing_events` table:
 
 ```text
-users: client_id, latest_visit_id, latest_visit_time
-events: client_id, visit_id, date_time, page_type, slug
+watch_id/event_id
+client_id
+date_time
+page_type
+slug
 ```
+
+These two tables are enough to build all per-request inference features:
+
+```text
+product_sequence
+last_slug
+last_category_slug
+GRU token sequence
+price tier sequence
+category index sequence
+```
+
+### Connect To Private RDS From A Laptop
+
+The RDS instance is private, so local development connects through the EC2 instance:
+
+```text
+Laptop -> SSH tunnel -> EC2 -> RDS PostgreSQL
+```
+
+First, allow the EC2 security group to access the RDS security group on PostgreSQL port `5432`. In the AWS RDS console, this can be configured with **Set up EC2 connection**.
+
+Verify the connection from EC2:
+
+```bash
+ssh -i ~/Downloads/my-first-ec2.pem ec2-user@ec2-54-237-239-176.compute-1.amazonaws.com
+sudo dnf install -y nmap-ncat
+nc -zv database-1.catyw6k6aqj6.us-east-1.rds.amazonaws.com 5432
+```
+
+The connectivity check should report that it connected to port `5432`. Exit the EC2 shell, then open the SSH tunnel from the laptop:
+
+```bash
+ssh -i ~/Downloads/my-first-ec2.pem \
+  -N \
+  -L 5433:database-1.catyw6k6aqj6.us-east-1.rds.amazonaws.com:5432 \
+  ec2-user@ec2-54-237-239-176.compute-1.amazonaws.com
+```
+
+Keep that terminal open. In a second terminal, install the asynchronous PostgreSQL driver:
+
+```bash
+uv add asyncpg
+```
+
+Set the local connection variables. Never commit the database password:
+
+```bash
+export DB_HOST=localhost
+export DB_PORT=5433
+export DB_NAME=postgres
+export DB_USER=recommenderdb
+export DB_PASSWORD='YOUR_RDS_PASSWORD'
+```
+
+Test the connection through the tunnel:
+
+```bash
+uv run python -c 'import asyncio, asyncpg, os; exec("async def main():\n    conn = await asyncpg.connect(host=os.environ[\"DB_HOST\"], port=int(os.environ[\"DB_PORT\"]), database=os.environ[\"DB_NAME\"], user=os.environ[\"DB_USER\"], password=os.environ[\"DB_PASSWORD\"], ssl=\"require\")\n    print(await conn.fetchval(\"SELECT version()\"))\n    await conn.close()\nasyncio.run(main())")'
+```
+
+For local tools and scripts, RDS is now available through:
+
+```text
+host: localhost
+port: 5433
+database: postgres
+```
+
+### Database Migrations
+
+The PostgreSQL schema is defined with SQLAlchemy models in `server/models.py` and versioned with Alembic migrations under `migrations/versions/`.
+
+Install and initialize the migration tooling:
+
+```bash
+uv add sqlalchemy alembic greenlet
+uv run alembic init migrations
+```
+
+Generate a migration after changing the SQLAlchemy models:
+
+```bash
+uv run alembic revision --autogenerate -m "create inference tables"
+```
+
+Review the generated file under `migrations/versions/`, then apply it to RDS:
+
+```bash
+uv run alembic upgrade head
+```
+
+Useful migration commands:
+
+```bash
+uv run alembic current
+uv run alembic history
+uv run alembic downgrade -1
+```
+
+Alembic versions the database schema only. RDS rows are handled separately through data-loading scripts and RDS backups.
 
 ### Runtime Flow
 
