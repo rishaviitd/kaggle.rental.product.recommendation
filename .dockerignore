@@ -8,6 +8,7 @@ __pycache__
 
 data
 artifacts/intermediate
+artifacts/final
 output
 migrations
 scripts

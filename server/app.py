@@ -3,14 +3,19 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request, status
 
+from server.artifact_loader import download_artifacts
 from server.database import Database
-from server.predictor import Predictor
 from server.schemas import HealthResponse, RecommendationResponse
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("\n=== STARTING RECOMMENDATION SERVICE ===")
+
+    await asyncio.to_thread(download_artifacts)
+
+    # Predictor imports inference.py, which expects downloaded artifacts.
+    from server.predictor import Predictor
 
     database = Database()
     await database.connect()

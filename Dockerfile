@@ -15,7 +15,6 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 COPY inference.py ./
 COPY server ./server
-COPY artifacts/final ./artifacts/final
 
 RUN useradd --create-home --uid 10001 appuser \
     && chown -R appuser:appuser /app
