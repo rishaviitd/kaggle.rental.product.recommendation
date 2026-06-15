@@ -1324,44 +1324,52 @@ name = "kaggle-rental-product-recommendation"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "alembic" },
     { name = "asyncpg" },
     { name = "boto3" },
-    { name = "dvc" },
-    { name = "dvc-s3" },
     { name = "fastapi" },
-    { name = "fastparquet" },
-    { name = "greenlet" },
     { name = "numpy" },
     { name = "pandas" },
-    { name = "pyarrow" },
     { name = "python-dotenv" },
-    { name = "pyyaml" },
-    { name = "sqlalchemy" },
     { name = "torch" },
     { name = "tqdm" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "alembic" },
+    { name = "dvc" },
+    { name = "dvc-s3" },
+    { name = "fastparquet" },
+    { name = "greenlet" },
+    { name = "pyarrow" },
+    { name = "pyyaml" },
+    { name = "sqlalchemy" },
+]
+
 [package.metadata]
 requires-dist = [
-    { name = "alembic", specifier = ">=1.18.4" },
     { name = "asyncpg", specifier = ">=0.31.0" },
     { name = "boto3", specifier = ">=1.42.0" },
-    { name = "dvc", specifier = ">=3.67.1" },
-    { name = "dvc-s3", specifier = ">=3.3.0" },
     { name = "fastapi", specifier = ">=0.137.0" },
-    { name = "fastparquet", specifier = ">=2026.5.0" },
-    { name = "greenlet", specifier = ">=3.5.1" },
     { name = "numpy", specifier = ">=2.4.6" },
     { name = "pandas", specifier = ">=3.0.3" },
-    { name = "pyarrow", specifier = ">=24.0.0" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
-    { name = "pyyaml", specifier = ">=6.0.3" },
-    { name = "sqlalchemy", specifier = ">=2.0.50" },
     { name = "torch", specifier = ">=2.12.0" },
     { name = "tqdm", specifier = ">=4.67.3" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.49.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "alembic", specifier = ">=1.18.4" },
+    { name = "dvc", specifier = ">=3.67.1" },
+    { name = "dvc-s3", specifier = ">=3.3.0" },
+    { name = "fastparquet", specifier = ">=2026.5.0" },
+    { name = "greenlet", specifier = ">=3.5.1" },
+    { name = "pyarrow", specifier = ">=24.0.0" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "sqlalchemy", specifier = ">=2.0.50" },
 ]
 
 [[package]]
