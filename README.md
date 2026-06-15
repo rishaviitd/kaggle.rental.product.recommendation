@@ -5,6 +5,10 @@
 <h1 align="center">Kaggle Rental Product Recommendation</h1>
 
 <p align="center">
+  🏆 <strong>Best Kaggle score:</strong> <code>Recall@6 = 0.417</code>
+</p>
+
+<p align="center">
   Session-based rental product recommender using a PyTorch GRU, statistical fallback recommenders, DVC artifact versioning, and an AWS-oriented serving design.
 </p>
 
@@ -26,8 +30,6 @@
 </p>
 
 ## Project Highlights
-
-🏆 **Best Kaggle score:** `Recall@6 = 0.417`
 
 | Area | Stack | Purpose |
 |---|---|---|
