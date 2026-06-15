@@ -26,7 +26,13 @@
   <img src="https://img.shields.io/badge/FastAPI-Serving-009688?logo=fastapi&logoColor=white" alt="FastAPI">
   <img src="https://img.shields.io/badge/Docker-Container-2496ED?logo=docker&logoColor=white" alt="Docker">
   <img src="https://img.shields.io/badge/Amazon%20EC2-Compute-FF9900?logo=amazonec2&logoColor=white" alt="Amazon EC2">
+  <img src="https://img.shields.io/badge/Amazon%20ECR-Registry-FF9900?logo=amazonwebservices&logoColor=white" alt="Amazon ECR">
   <img src="https://img.shields.io/badge/PostgreSQL-RDS-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL">
+  <img src="https://img.shields.io/badge/GitHub%20Actions-CI%2FCD-2088FF?logo=githubactions&logoColor=white" alt="GitHub Actions">
+  <img src="https://img.shields.io/badge/Locust-Load%20Testing-2C3E50?logo=python&logoColor=white" alt="Locust">
+  <img src="https://img.shields.io/badge/Prometheus-Metrics-E6522C?logo=prometheus&logoColor=white" alt="Prometheus">
+  <img src="https://img.shields.io/badge/Grafana-Dashboards-F46800?logo=grafana&logoColor=white" alt="Grafana">
+  <img src="https://img.shields.io/badge/CloudWatch-AWS%20Metrics-FF4F8B?logo=amazoncloudwatch&logoColor=white" alt="Amazon CloudWatch">
 </p>
 
 ## Project Highlights
@@ -37,6 +43,8 @@
 | Artifact storage | Amazon S3, DVC remote | Version intermediate and final model artifacts outside Git. |
 | Model serving | FastAPI, Docker, EC2 | Serve realtime recommendations from a lightweight CPU deployment. |
 | Inference data | Amazon RDS PostgreSQL | Store user/session rows and browsing events used for feature generation. |
+| Container delivery | Amazon ECR, GitHub Actions | Store production images and automate CI/CD deployments to EC2. |
+| Performance testing | Locust, Prometheus, Grafana, CloudWatch | Measure API capacity and identify application or infrastructure bottlenecks. |
 
 **Recommendation logic:** GRU for richer sessions, co-occurrence/transition/trigram fallbacks for short sessions, and search/category/global popularity fallbacks for cold-start behavior.
 
@@ -315,6 +323,38 @@ Per request:
 ```
 
 The final artifact bundle is small, around 2.6 MB, so the model and lookup artifacts should stay loaded in memory on EC2. Each request should only query RDS and run feature generation/inference; it should not reload the model.
+
+## Performance Testing And Observability
+
+The performance milestone combines load generation, application metrics, and AWS infrastructure monitoring. Locust sends concurrent recommendation requests to FastAPI, Prometheus records application-level behavior, CloudWatch monitors EC2 and RDS, and Grafana brings both metric sources into one dashboard.
+
+```mermaid
+flowchart LR
+    LOCUST["Locust<br/>concurrent load testing"] --> API["FastAPI on EC2<br/>recommendation API"]
+
+    API --> PROM["Prometheus<br/>request, database, feature,<br/>and inference metrics"]
+    API --> CW["CloudWatch<br/>EC2 and RDS metrics"]
+
+    PROM --> GRAFANA["Grafana<br/>performance dashboard"]
+    CW --> GRAFANA
+
+    classDef testing fill:#eef2ff,stroke:#6366f1,color:#1e293b;
+    classDef service fill:#dcfce7,stroke:#22c55e,color:#1e293b;
+    classDef metrics fill:#fff7ed,stroke:#f97316,color:#1e293b;
+    classDef dashboard fill:#cffafe,stroke:#06b6d4,color:#1e293b;
+
+    class LOCUST testing;
+    class API service;
+    class PROM,CW metrics;
+    class GRAFANA dashboard;
+```
+
+The benchmark will increase concurrency gradually and track:
+
+- Throughput, failures, and p50/p95/p99 latency from Locust.
+- Request, database, feature-generation, and inference duration from Prometheus.
+- EC2 CPU/network and RDS CPU/connections/I/O from CloudWatch.
+- Correlated application and infrastructure behavior in Grafana.
 
 ## Overall Architecture
 
