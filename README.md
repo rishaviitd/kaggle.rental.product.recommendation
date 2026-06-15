@@ -48,315 +48,13 @@
 
 **Recommendation logic:** GRU for richer sessions, co-occurrence/transition/trigram fallbacks for short sessions, and search/category/global popularity fallbacks for cold-start behavior.
 
-## Reproduce The Output
-
-This project uses [`uv`](https://docs.astral.sh/uv/) to guarantee 100% dependency reproducibility.
-The training pipeline is managed with DVC so generated artifacts can be reproduced from the same code, params, and data.
-
-```bash
-git clone https://github.com/rishaviitd/kaggle.rental.product.recommendation.git
-cd kaggle.rental.product.recommendation
-
-uv sync
-```
-
-### Data Requirement
-
-Raw competition data is not committed to this repository.
-Before running the pipeline, place the required parquet files under `data/`:
-
-```text
-data/metrika_hits.parquet
-data/metrika_visits.parquet
-data/metrika_hits_test.parquet
-data/metrika_visits_test.parquet
-data/products_all.parquet
-data/old_site_products.parquet
-data/new_site_products.parquet
-data/old_site_new_site_products.parquet
-data/new_site_orders.parquet
-data/old_site_orders.parquet
-```
-
-### Rebuild Artifacts Locally
-
-Use this when you have the raw `data/` files and want to regenerate all intermediate and final artifacts.
-
-```bash
-uv run dvc repro --force
-uv run inference.py
-```
-
-This creates:
-
-```text
-artifacts/intermediate/
-artifacts/final/
-output/predictions.csv
-```
-
-### Restore Artifacts From A DVC Remote
-
-Use this when you have access to a DVC remote. The remote must be configured first.
-It can point to S3 or to a local artifact/cache directory, depending on your setup.
-
-Example S3 remote:
-
-```bash
-uv run dvc remote add -d artifacts-s3 s3://your-bucket/path/to/dvc-cache
-```
-
-Example local remote:
-
-```bash
-uv run dvc remote add -d artifacts-local /path/to/local/dvc-cache
-```
-
-Then restore artifacts and generate predictions:
-
-```bash
-uv run dvc pull
-uv run inference.py
-```
-
-The Git repository stores code, `params.yaml`, `dvc.yaml`, and `dvc.lock`.
-DVC stores generated artifacts listed as pipeline outputs.
-If you want to version your own raw data with DVC, configure your own remote and run `dvc add` for the files under `data/`.
+## Model Training
 
 This repository contains a hybrid recommendation system built to predict the next rental product a user will interact with based on their browsing session history.
 
 The solution heavily leverages sequence modeling alongside robust fallback strategies to handle everything from rich, long-term user histories down to complete cold-starts.
 
-## Model Serving And Realtime Inference
-
-The first production serving design keeps the system intentionally simple: one Dockerized FastAPI service runs on EC2, reads the minimum required inference data from RDS, downloads the final artifact bundle from S3 during deployment or service startup, and returns recommendations by `client_id`. After startup, the PyTorch model and lookup artifacts stay loaded in EC2 RAM so each request can reuse them without reading from S3 again.
-
-```mermaid
-flowchart LR
-    CLIENT["Client / App<br/>GET /recommend/{client_id}"] --> API
-
-    subgraph EC2["EC2"]
-        direction LR
-        API["Dockerized FastAPI<br/>model files in RAM"] --> FEATURES["Feature generation<br/>build inference features"]
-        FEATURES --> FEATURESET["Inference features<br/>product sequence<br/>last slug and category<br/>GRU token, tier, category sequences"]
-        FEATURESET --> MODEL["Inference engine<br/>GRU + fallback recommenders"]
-        MODEL --> RESPONSE["Response<br/>top 6 product ids"]
-    end
-
-    subgraph RDS["Amazon RDS"]
-        direction TB
-        USERS["users<br/>latest visit/session context"]
-        EVENTS["user_browsing_events<br/>page views and product/category slugs"]
-    end
-
-    USERS --> FEATURES
-    EVENTS --> FEATURES
-```
-
-### Serving Request
-
-The client should not send model features directly. It should send only the user/session identifier:
-
-```http
-GET /recommend/{client_id}
-```
-
-Example response:
-
-```json
-{
-  "client_id": "0911978007540833652",
-  "recommendations": ["123", "456", "789", "222", "333", "444"]
-}
-```
-
-### RDS Tables
-
-The RDS schema should store only the fields needed during inference, not the full training parquet schema. For serving, the two test parquet datasets map to two lean RDS tables.
-
-`metrika_visits_test.parquet` becomes the `users` table:
-
-```text
-client_id
-visit_id
-date_time
-```
-
-`metrika_hits_test.parquet` becomes the `user_browsing_events` table:
-
-```text
-watch_id/event_id
-client_id
-date_time
-page_type
-slug
-```
-
-These two tables are enough to build all per-request inference features:
-
-```text
-product_sequence
-last_slug
-last_category_slug
-GRU token sequence
-price tier sequence
-category index sequence
-```
-
-### Connect To Private RDS From A Laptop
-
-The RDS instance is private, so local development connects through the EC2 instance:
-
-```text
-Laptop -> SSH tunnel -> EC2 -> RDS PostgreSQL
-```
-
-First, allow the EC2 security group to access the RDS security group on PostgreSQL port `5432`. In the AWS RDS console, this can be configured with **Set up EC2 connection**.
-
-Verify the connection from EC2:
-
-```bash
-ssh -i ~/Downloads/my-first-ec2.pem ec2-user@ec2-54-237-239-176.compute-1.amazonaws.com
-sudo dnf install -y nmap-ncat
-nc -zv database-1.catyw6k6aqj6.us-east-1.rds.amazonaws.com 5432
-```
-
-The connectivity check should report that it connected to port `5432`. Exit the EC2 shell, then open the SSH tunnel from the laptop:
-
-```bash
-ssh -i ~/Downloads/my-first-ec2.pem \
-  -N \
-  -L 5433:database-1.catyw6k6aqj6.us-east-1.rds.amazonaws.com:5432 \
-  ec2-user@ec2-54-237-239-176.compute-1.amazonaws.com
-```
-
-Keep that terminal open. In a second terminal, install the asynchronous PostgreSQL driver:
-
-```bash
-uv add asyncpg
-```
-
-Set the local connection variables. Never commit the database password:
-
-```bash
-export DB_HOST=localhost
-export DB_PORT=5433
-export DB_NAME=postgres
-export DB_USER=recommenderdb
-export DB_PASSWORD='YOUR_RDS_PASSWORD'
-```
-
-Test the connection through the tunnel:
-
-```bash
-uv run python -c 'import asyncio, asyncpg, os; exec("async def main():\n    conn = await asyncpg.connect(host=os.environ[\"DB_HOST\"], port=int(os.environ[\"DB_PORT\"]), database=os.environ[\"DB_NAME\"], user=os.environ[\"DB_USER\"], password=os.environ[\"DB_PASSWORD\"], ssl=\"require\")\n    print(await conn.fetchval(\"SELECT version()\"))\n    await conn.close()\nasyncio.run(main())")'
-```
-
-For local tools and scripts, RDS is now available through:
-
-```text
-host: localhost
-port: 5433
-database: postgres
-```
-
-### Database Migrations
-
-The PostgreSQL schema is defined with SQLAlchemy models in `server/models.py` and versioned with Alembic migrations under `migrations/versions/`.
-
-Install and initialize the migration tooling:
-
-```bash
-uv add sqlalchemy alembic greenlet
-uv run alembic init migrations
-```
-
-Generate a migration after changing the SQLAlchemy models:
-
-```bash
-uv run alembic revision --autogenerate -m "create inference tables"
-```
-
-Review the generated file under `migrations/versions/`, then apply it to RDS:
-
-```bash
-uv run alembic upgrade head
-```
-
-Useful migration commands:
-
-```bash
-uv run alembic current
-uv run alembic history
-uv run alembic downgrade -1
-```
-
-Alembic versions the database schema only. RDS rows are handled separately through data-loading scripts and RDS backups.
-
-### Runtime Flow
-
-On service startup:
-
-```text
-1. Ensure artifacts/final exists on EC2.
-2. If needed, download final artifacts from S3.
-3. Load pickle/json artifacts.
-4. Load model.pt into CPU memory.
-5. Start FastAPI.
-```
-
-Per request:
-
-```text
-1. Receive client_id.
-2. Query users for the latest visit/session context.
-3. Query user_browsing_events for that client/session window.
-4. Build inference features:
-   product_sequence
-   last_slug
-   last_category_slug
-   GRU token sequence
-   price tier sequence
-   category index sequence
-5. Run GRU/fallback inference.
-6. Return top 6 product ids.
-```
-
-The final artifact bundle is small, around 2.6 MB, so the model and lookup artifacts should stay loaded in memory on EC2. Each request should only query RDS and run feature generation/inference; it should not reload the model.
-
-## Performance Testing And Observability
-
-The performance milestone combines load generation, application metrics, and AWS infrastructure monitoring. Locust sends concurrent recommendation requests to FastAPI, Prometheus records application-level behavior, CloudWatch monitors EC2 and RDS, and Grafana brings both metric sources into one dashboard.
-
-```mermaid
-flowchart LR
-    LOCUST["Locust<br/>concurrent load testing"] --> API["FastAPI on EC2<br/>recommendation API"]
-
-    API --> PROM["Prometheus<br/>request, database, feature,<br/>and inference metrics"]
-    API --> CW["CloudWatch<br/>EC2 and RDS metrics"]
-
-    PROM --> GRAFANA["Grafana<br/>performance dashboard"]
-    CW --> GRAFANA
-
-    classDef testing fill:#eef2ff,stroke:#6366f1,color:#1e293b;
-    classDef service fill:#dcfce7,stroke:#22c55e,color:#1e293b;
-    classDef metrics fill:#fff7ed,stroke:#f97316,color:#1e293b;
-    classDef dashboard fill:#cffafe,stroke:#06b6d4,color:#1e293b;
-
-    class LOCUST testing;
-    class API service;
-    class PROM,CW metrics;
-    class GRAFANA dashboard;
-```
-
-The benchmark will increase concurrency gradually and track:
-
-- Throughput, failures, and p50/p95/p99 latency from Locust.
-- Request, database, feature-generation, and inference duration from Prometheus.
-- EC2 CPU/network and RDS CPU/connections/I/O from CloudWatch.
-- Correlated application and infrastructure behavior in Grafana.
-
-## Overall Architecture
+### Recommendation Architecture
 
 The system operates as a **Multi-Tiered Recommender**. The core of the system is a Dual-Path GRU (Gated Recurrent Unit) neural network that predicts the next item in a sequence based on recent product clicks, price tier, and category context.
 
@@ -407,7 +105,7 @@ The session length decides which tier handles the visit, and unfilled slots alwa
 
 ---
 
-## Dual Path GRU Architecture
+### Dual Path GRU Architecture
 
 The primary prediction engine is a custom PyTorch sequence model built from compact inputs that proved most useful in ablations.
 
@@ -473,3 +171,280 @@ flowchart TD
 * **Category Path**
   * Simultaneously feeds the sequence of product categories into a parallel, secondary GRU layer.
   * Allows the model to recognize high-level intent (e.g., "this user is looking at strollers") even if it hasn't seen the specific item IDs before.
+
+### Reproduce The Training Pipeline
+
+This project uses [`uv`](https://docs.astral.sh/uv/) to guarantee 100% dependency reproducibility.
+The training pipeline is managed with DVC so generated artifacts can be reproduced from the same code, params, and data.
+
+```bash
+uv sync
+uv run dvc repro --force
+```
+
+This creates:
+
+```text
+artifacts/intermediate/
+artifacts/final/
+```
+
+## Artifact Storage And Versioning
+
+Use this when you have access to a DVC remote. The remote must be configured first.
+It can point to S3 or to a local artifact/cache directory, depending on your setup.
+
+Example S3 remote:
+
+```bash
+uv run dvc remote add -d artifacts-s3 s3://<S3_BUCKET>/<DVC_CACHE_PREFIX>
+```
+
+Example local remote:
+
+```bash
+uv run dvc remote add -d artifacts-local <LOCAL_DVC_CACHE_PATH>
+```
+
+Then restore the artifacts:
+
+```bash
+uv run dvc pull
+```
+
+The Git repository stores code, `params.yaml`, `dvc.yaml`, and `dvc.lock`.
+DVC stores generated artifacts listed as pipeline outputs.
+If you want to version your own raw data with DVC, configure your own remote and run `dvc add` for the files under `data/`.
+
+## Model Serving And Realtime Inference
+
+The first production serving design keeps the system intentionally simple: one Dockerized FastAPI service runs on EC2, reads the minimum required inference data from RDS, downloads the final artifact bundle from S3 during deployment or service startup, and returns recommendations by `client_id`. After startup, the PyTorch model and lookup artifacts stay loaded in EC2 RAM so each request can reuse them without reading from S3 again.
+
+```mermaid
+flowchart LR
+    CLIENT["Client / App<br/>GET /recommend/{client_id}"] --> API
+
+    subgraph EC2["EC2"]
+        direction LR
+        API["Dockerized FastAPI<br/>model files in RAM"] --> FEATURES["Feature generation<br/>build inference features"]
+        FEATURES --> FEATURESET["Inference features<br/>product sequence<br/>last slug and category<br/>GRU token, tier, category sequences"]
+        FEATURESET --> MODEL["Inference engine<br/>GRU + fallback recommenders"]
+        MODEL --> RESPONSE["Response<br/>top 6 product ids"]
+    end
+
+    subgraph RDS["Amazon RDS"]
+        direction TB
+        USERS["users<br/>latest visit/session context"]
+        EVENTS["user_browsing_events<br/>page views and product/category slugs"]
+    end
+
+    USERS --> FEATURES
+    EVENTS --> FEATURES
+```
+
+### Serving Request
+
+The client should not send model features directly. It should send only the user/session identifier:
+
+```http
+GET /recommend/{client_id}
+```
+
+Example response:
+
+```json
+{
+  "client_id": "0911978007540833652",
+  "recommendations": ["123", "456", "789", "222", "333", "444"]
+}
+```
+
+### Runtime Flow
+
+On service startup:
+
+```text
+1. Ensure artifacts/final exists on EC2.
+2. If needed, download final artifacts from S3.
+3. Load pickle/json artifacts.
+4. Load model.pt into CPU memory.
+5. Start FastAPI.
+```
+
+Per request:
+
+```text
+1. Receive client_id.
+2. Query users for the latest visit/session context.
+3. Query user_browsing_events for that client/session window.
+4. Build inference features:
+   product_sequence
+   last_slug
+   last_category_slug
+   GRU token sequence
+   price tier sequence
+   category index sequence
+5. Run GRU/fallback inference.
+6. Return top 6 product ids.
+```
+
+The final artifact bundle is small, around 2.6 MB, so the model and lookup artifacts should stay loaded in memory on EC2. Each request should only query RDS and run feature generation/inference; it should not reload the model.
+
+## Inference Data And RDS
+
+The RDS schema should store only the fields needed during inference, not the full training parquet schema. For serving, the two test parquet datasets map to two lean RDS tables.
+
+`metrika_visits_test.parquet` becomes the `users` table:
+
+```text
+client_id
+visit_id
+date_time
+```
+
+`metrika_hits_test.parquet` becomes the `user_browsing_events` table:
+
+```text
+watch_id/event_id
+client_id
+date_time
+page_type
+slug
+```
+
+These two tables are enough to build all per-request inference features:
+
+```text
+product_sequence
+last_slug
+last_category_slug
+GRU token sequence
+price tier sequence
+category index sequence
+```
+
+### Connect To Private RDS From A Laptop
+
+The RDS instance is private, so local development connects through the EC2 instance:
+
+```text
+Laptop -> SSH tunnel -> EC2 -> RDS PostgreSQL
+```
+
+First, allow the EC2 security group to access the RDS security group on PostgreSQL port `5432`. In the AWS RDS console, this can be configured with **Set up EC2 connection**.
+
+Verify the connection from EC2:
+
+```bash
+ssh -i <SSH_KEY_PATH> ec2-user@<EC2_PUBLIC_DNS>
+sudo dnf install -y nmap-ncat
+nc -zv <RDS_ENDPOINT> 5432
+```
+
+The connectivity check should report that it connected to port `5432`. Exit the EC2 shell, then open the SSH tunnel from the laptop:
+
+```bash
+ssh -i <SSH_KEY_PATH> \
+  -N \
+  -L 5433:<RDS_ENDPOINT>:5432 \
+  ec2-user@<EC2_PUBLIC_DNS>
+```
+
+Keep that terminal open. In a second terminal, install the asynchronous PostgreSQL driver:
+
+```bash
+uv add asyncpg
+```
+
+Set the local connection variables. Never commit the database password:
+
+```bash
+export DB_HOST=localhost
+export DB_PORT=5433
+export DB_NAME=<DB_NAME>
+export DB_USER=<DB_USER>
+export DB_PASSWORD='<DB_PASSWORD>'
+```
+
+Test the connection through the tunnel:
+
+```bash
+uv run python -c 'import asyncio, asyncpg, os; exec("async def main():\n    conn = await asyncpg.connect(host=os.environ[\"DB_HOST\"], port=int(os.environ[\"DB_PORT\"]), database=os.environ[\"DB_NAME\"], user=os.environ[\"DB_USER\"], password=os.environ[\"DB_PASSWORD\"], ssl=\"require\")\n    print(await conn.fetchval(\"SELECT version()\"))\n    await conn.close()\nasyncio.run(main())")'
+```
+
+For local tools and scripts, RDS is now available through:
+
+```text
+host: localhost
+port: 5433
+database: postgres
+```
+
+### Database Migrations
+
+The PostgreSQL schema is defined with SQLAlchemy models in `server/models.py` and versioned with Alembic migrations under `migrations/versions/`.
+
+Install and initialize the migration tooling:
+
+```bash
+uv add sqlalchemy alembic greenlet
+uv run alembic init migrations
+```
+
+Generate a migration after changing the SQLAlchemy models:
+
+```bash
+uv run alembic revision --autogenerate -m "create inference tables"
+```
+
+Review the generated file under `migrations/versions/`, then apply it to RDS:
+
+```bash
+uv run alembic upgrade head
+```
+
+Useful migration commands:
+
+```bash
+uv run alembic current
+uv run alembic history
+uv run alembic downgrade -1
+```
+
+Alembic versions the database schema only. RDS rows are handled separately through data-loading scripts and RDS backups.
+
+## Container Delivery And CI/CD
+
+The production Docker image is stored in Amazon ECR and deployed to EC2. GitHub Actions is the CI/CD layer for building, publishing, and deploying new immutable image versions when the serving code changes.
+
+## Performance Testing And Observability
+
+The performance milestone combines load generation, application metrics, and AWS infrastructure monitoring. Locust sends concurrent recommendation requests to FastAPI, Prometheus records application-level behavior, CloudWatch monitors EC2 and RDS, and Grafana brings both metric sources into one dashboard.
+
+```mermaid
+flowchart LR
+    LOCUST["Locust<br/>concurrent load testing"] --> API["FastAPI on EC2<br/>recommendation API"]
+
+    API --> PROM["Prometheus<br/>request, database, feature,<br/>and inference metrics"]
+    API --> CW["CloudWatch<br/>EC2 and RDS metrics"]
+
+    PROM --> GRAFANA["Grafana<br/>performance dashboard"]
+    CW --> GRAFANA
+
+    classDef testing fill:#eef2ff,stroke:#6366f1,color:#1e293b;
+    classDef service fill:#dcfce7,stroke:#22c55e,color:#1e293b;
+    classDef metrics fill:#fff7ed,stroke:#f97316,color:#1e293b;
+    classDef dashboard fill:#cffafe,stroke:#06b6d4,color:#1e293b;
+
+    class LOCUST testing;
+    class API service;
+    class PROM,CW metrics;
+    class GRAFANA dashboard;
+```
+
+The benchmark will increase concurrency gradually and track:
+
+- Throughput, failures, and p50/p95/p99 latency from Locust.
+- Request, database, feature-generation, and inference duration from Prometheus.
+- EC2 CPU/network and RDS CPU/connections/I/O from CloudWatch.
+- Correlated application and infrastructure behavior in Grafana.
